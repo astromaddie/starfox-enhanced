@@ -14,6 +14,7 @@ REQUIRED_FILES = {
     "starfox_steamframe",
     "LAUNCH-STEAM-FRAME.sh",
     "STEAM-FRAME-START-HERE.txt",
+    "vrpreferences.json",
     "BUILD-METADATA.json",
     "THIRD_PARTY_NOTICES.md",
     "CREDITS.md",
@@ -51,6 +52,14 @@ FORBIDDEN_NAMES = {
     "sf.sfc",
     "sfes.sfc",
     "starfox-msu1.pak",
+}
+EXPECTED_VR_PREFERENCES = {
+    "steam_frame": {
+        "preferResolution": 2160,
+        "preferMinRefreshRate": 90,
+        "preferHalfFramerate": False,
+        "preferMotionSmoothingMode": "off",
+    },
 }
 
 
@@ -93,6 +102,13 @@ def validate(package: pathlib.Path, artifact_set: str = "runtime-package") -> No
             raise AssertionError(f"artifact is not executable: {executable}")
     if artifact_set == "runtime-package" and not files["LAUNCH-STEAM-FRAME.sh"].stat().st_mode & 0o111:
         raise AssertionError("Steam Frame launcher is not executable")
+    if artifact_set == "runtime-package":
+        try:
+            preferences = json.loads(files["vrpreferences.json"].read_text(encoding="utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise AssertionError("Steam Frame VR preferences are not valid JSON") from error
+        if preferences != EXPECTED_VR_PREFERENCES:
+            raise AssertionError("Steam Frame VR preferences do not match the reviewed defaults")
 
     forbidden = []
     for name, path in files.items():

@@ -138,6 +138,9 @@ if(NOT ANDROID)
             "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-XBRZ.txt"
             DESTINATION . COMPONENT steamframe)
         install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/package/vrpreferences.json"
+            DESTINATION . COMPONENT steamframe)
+        install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
             DESTINATION licenses/fonts COMPONENT steamframe)
@@ -162,6 +165,8 @@ if(NOT ANDROID)
     target_link_libraries(starfox_vr_input_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_game_input_check tests/vr_game_input_tests.cpp)
     target_link_libraries(starfox_vr_game_input_check PRIVATE starfox_vr_game)
+    add_executable(starfox_vr_rumble_parity_check tests/vr_rumble_parity_tests.cpp)
+    target_link_libraries(starfox_vr_rumble_parity_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_packet_check tests/vr_draw_packet_tests.cpp)
     target_link_libraries(starfox_vr_packet_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_runtime_check tools/check_openxr_runtime.cpp)

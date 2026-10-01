@@ -50,6 +50,25 @@ int main(int argc,char** argv) try {
     const auto rom=starfox::assets::RomImage::load(argv[1]);
     const auto symbols=starfox::assets::SymbolMap::load(argv[2]);
     {
+        starfox::simulation::GameSimulation raster_game(rom,symbols,"LEVEL1_1",{},true);
+        std::vector<bool> logic_ready_at_raster;
+        starfox::vr::GameFrameDriver raster_driver(raster_game,
+            [](auto,auto) {return std::array<uint8_t,4>{};},nullptr,[&] {
+                logic_ready_at_raster.push_back(raster_game.logic_tick_ready());
+            });
+        static_cast<void>(raster_driver.advance(0,{},true));
+        const auto first=raster_driver.advance(50'000'000,{},true);
+        if(first.video_phases!=3 || first.logic_ticks!=1
+            || logic_ready_at_raster!=std::vector<bool>{false,false,true})
+            throw std::runtime_error("Source-raster callback did not run once after present and before its logic tick");
+        const auto callback_count=logic_ready_at_raster.size();
+        const auto duplicate=raster_driver.advance(50'000'000,{},true);
+        static_cast<void>(raster_driver.advance(100'000'000,{},false));
+        if(!duplicate.duplicate || logic_ready_at_raster.size()!=callback_count)
+            throw std::runtime_error("Duplicate eyes or unfocused frames advanced source-raster work");
+        std::cout<<"VR source-raster callback order and duplicate/focus suppression passed\n";
+    }
+    {
         starfox::simulation::GameSimulation selected(rom,symbols,"INTROMAP",{},true);
         const auto initial=selected.save_state();
         if(selected.launch_selected_level() || selected.save_state()!=initial)

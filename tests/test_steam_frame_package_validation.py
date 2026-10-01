@@ -12,7 +12,10 @@ import tempfile
 
 SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
-from test_steam_frame_package import validate  # noqa: E402
+from test_steam_frame_package import (  # noqa: E402
+    EXPECTED_VR_PREFERENCES,
+    validate,
+)
 
 
 SYSROOT_SHA256 = "8e162d235aeb1e6d283ab028e2c7b933061abc1d59830829c9e311cc73b3dd20"
@@ -80,6 +83,7 @@ def write_metadata(root: pathlib.Path, artifact_set: str) -> None:
 def test_runtime_package(root: pathlib.Path) -> None:
     files = (
         "starfox_steamframe", "LAUNCH-STEAM-FRAME.sh", "STEAM-FRAME-START-HERE.txt",
+        "vrpreferences.json",
         "THIRD_PARTY_NOTICES.md", "CREDITS.md", "LICENSE-XBRZ.txt",
         "licenses/fonts/README.md", "licenses/fonts/misaki.txt",
     )
@@ -89,8 +93,26 @@ def test_runtime_package(root: pathlib.Path) -> None:
         path.write_text("fixture", encoding="utf-8")
     for executable in ("starfox_steamframe", "LAUNCH-STEAM-FRAME.sh"):
         (root / executable).chmod(0o755)
+    (root / "vrpreferences.json").write_text(
+        json.dumps(EXPECTED_VR_PREFERENCES), encoding="utf-8"
+    )
     write_metadata(root, "runtime-package")
     validate(root, "runtime-package")
+
+    (root / "vrpreferences.json").write_text(
+        json.dumps({"steam_frame": {"preferMinRefreshRate": 120}}), encoding="utf-8"
+    )
+    write_metadata(root, "runtime-package")
+    try:
+        validate(root, "runtime-package")
+    except AssertionError as error:
+        if "reviewed defaults" not in str(error):
+            raise
+    else:
+        raise AssertionError("runtime package accepted incorrect Steam Frame preferences")
+    (root / "vrpreferences.json").write_text(
+        json.dumps(EXPECTED_VR_PREFERENCES), encoding="utf-8"
+    )
 
     (root / "vr-preferences.bin").write_bytes(b"private user data")
     write_metadata(root, "runtime-package")

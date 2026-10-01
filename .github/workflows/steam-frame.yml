@@ -37,6 +37,7 @@ jobs:
             -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
           cmake --build "$RUNNER_TEMP/starfox-frame-host-vr" \
             --target starfox_pcvr starfox_desktop_paths_tests starfox_vr_application_tests \
+              starfox_vr_game_input_check starfox_vr_rumble_parity_check \
               starfox_vr_presentation_check starfox_vr_input_check starfox_vr_camera_check \
               starfox_vr_swapchain_check starfox_vr_session_check starfox_vr_runtime_tests \
               starfox_rumble_sequencer_tests \

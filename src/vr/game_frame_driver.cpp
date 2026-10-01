@@ -6,8 +6,10 @@ void GameFrameDriver::reset_for_scene_change() noexcept {
     apu_.clear();msu_.clear();audio_phase_=0;
     if(scenes_) scenes_->reset_interpolation();
 }
-GameFrameDriver::GameFrameDriver(simulation::GameSimulation& game,AudioTick audio,GameSceneHistory* scenes)
-    :game_(game),audio_(std::move(audio)),scenes_(scenes) {
+GameFrameDriver::GameFrameDriver(simulation::GameSimulation& game,AudioTick audio,
+    GameSceneHistory* scenes,SourceRaster source_raster)
+    :game_(game),audio_(std::move(audio)),scenes_(scenes),
+     source_raster_(std::move(source_raster)) {
     if(scenes_ && &scenes_->game()!=&game_)
         throw std::invalid_argument("VR scene history belongs to a different game");
 }
@@ -29,6 +31,7 @@ GameFrameAdvance GameFrameDriver::advance(XrTime time,const VrControls& controls
     try {
         for(unsigned phase=0;phase<batch.simulation_steps;++phase) {
             game_.present_frame();++result.video_phases;
+            if(source_raster_) source_raster_();
             if(game_.logic_tick_ready()) {
                 const bool options_open=game_.runtime_options_open();
                 const auto tick=game_.tick(input_.consume());++result.logic_ticks;

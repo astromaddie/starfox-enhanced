@@ -109,6 +109,7 @@ public:
         if(succeeded) rumbling_=low!=0U || high!=0U;
         return succeeded;
     }
+    bool rumble_available() const noexcept {return gamepad_!=nullptr;}
     void stop_rumble() noexcept {
         if(gamepad_ && rumbling_)
             static_cast<void>(SDL_RumbleGamepad(gamepad_,0U,0U,0U));
@@ -198,6 +199,7 @@ int main(int argc,char** argv) try {
     host.stop_requested=[] {return interrupted!=0;};
     DesktopGamepad gamepad;
     host.desktop_controls=[&gamepad] {return gamepad.sample();};
+    host.desktop_rumble_available=[&gamepad] {return gamepad.rumble_available();};
     host.desktop_rumble=[&gamepad](std::uint16_t low,std::uint16_t high,std::uint32_t duration) {
         return gamepad.rumble(low,high,duration);
     };

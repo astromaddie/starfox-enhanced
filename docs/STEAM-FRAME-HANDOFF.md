@@ -91,10 +91,22 @@ intentionally exited that session through Steam. Asymmetric eye poses and
 sustained performance remain unverified. These observations came from the older
 Touch/Index-compatible bindings and do not verify the new Frame map.
 
+The newer `1bd5713` source passed all four hosted CI jobs, and the runtime
+package upload/hash validation passed. The wearer reported that it runs, with a
+large opaque black border taking up roughly half of the view; that presentation
+defect is assigned separately. Device logs for PID 100569 record successful
+Frame binding loads and later `FOCUSED` transitions. Subsequent captures taken
+while the runtime reported standby are black and do not show the
+reported HUD defect. Exact button, audio, and menu behavior still require
+separate wearer confirmation. Current evidence
+is in `/tmp/starfox-frame-run-1bd5713` and
+`/tmp/starfox-frame-device-evidence.json`.
+
 The current controller change enables `/interaction_profiles/valve/frame_controller_valve`
 only when `XR_VALVE_frame_controller_interaction` is advertised. It maps left
-stick/D-pad to steering, right X/B/Y/A to fire/bomb/boost/brake, bumpers to
-left/right roll, right Menu to Start, and left View to Select; existing
+stick/D-pad to steering, right A/B/X/Y to brake/bomb/fire/boost, bumpers to
+left/right roll, right Menu to Start, and left View to Select; physical A/Menu
+also confirms host menus. Existing
 Simple, Touch, and Index bindings remain. Input arbitration selects one active
 source per action, with desktop gamepad fallback for actions the OpenXR profile
 does not activate. SDL menu/select/reset edges are synchronized during focus
@@ -115,38 +127,62 @@ C_TYPE and host face-swap behavior remain unchanged.
 
 The shared OpenXR haptic API supports the Frame and existing fallback profiles;
 it maps the authored dual-band amplitude to `max(low, high)` on the native
-40 ms pulse and stops active outputs on focus loss and shutdown. The flat
-cartridge rumble sequencer was extracted without changing its register updates
-and its focused sequence tests pass. The independent 72/90/120 Hz flat/VR
-rumble-and-audio parity work is not part of this controller milestone; VR
-source-raster rumble advancement and device haptic playback remain pending. An
-earlier independent Original focus run reported equal game state but a
-serialized audio-state difference beginning at byte 65,584 and PCM divergence
-at sample 67,385 at 72 Hz; output ports and logic/audio/raster counts matched.
-A later rebuilt run with full APU-write tracing passed Original parity at
-72/90/120 Hz. A paired control then used the same instrumented binary with
-rumble enabled and disabled; both settings passed twice with matching 84,811
-APU writes, 40 output ports, 128,000 PCM samples, 276,286 serialized audio bytes,
-and game state. The earlier 72 Hz focus discrepancy remains unexplained and
-unreproduced under this instrumentation; there is no supported causal narrowing
-toward rumble and no restored VR rumble hook. Private paired-control evidence
-is retained outside the repository in the development data directory.
+40 ms pulse and stops active outputs on focus loss and shutdown. The extracted
+flat cartridge rumble sequencer is now advanced by the shared VR frame driver
+once immediately after each 60 Hz source raster is presented and before its
+possible logic tick. Duplicate XR eye submissions do not advance it. Live VR
+advances the cartridge registers only for Original with the game's rumble
+setting enabled, available authored rumble symbols, and an eligible output
+sink. A usable OpenXR haptic binding is selected over SDL gamepad rumble;
+never both are triggered for one effect. Without a sink the sequencer does not
+mutate cartridge registers. Focus loss, paused/menu state, session exit, and
+shutdown stop active outputs. EX does not advance authored rumble sequences.
+
+The independent parity executable compares 120 native source rasters with the
+production VR frame driver at 72, 90, and 120 Hz. It compares complete game
+state, APU write traces, audio ports, serialized audio state, PCM, and rumble
+effects/cadence, including duplicate-eye retries, changing per-eye matrices
+through production `eye_camera()`, focus pause/resume, and a no-output-sink
+case. The held steer/fire/boost/roll scenario goes through production
+`VrGameInput` and is compared with an independently latched flat SNES-button
+input. On the host, Original passed with rumble enabled (21 active authored
+samples) and disabled (0); EX passed with rumble enabled (0). The
+Original/EX game-input regressions also passed with the new source-raster
+ordering check. The earlier independent Original focus run reported equal
+game state but a serialized audio-state difference beginning at byte 65,584
+and PCM divergence at sample 67,385 at 72 Hz; output ports and logic/audio/
+raster counts matched. A later controlled run using one instrumented binary
+with rumble enabled and disabled passed both settings twice, but the earlier
+72 Hz focus discrepancy remains unexplained and unreproduced under that
+instrumentation. The new parity matrix passes; it does not establish the cause
+of that historical discrepancy or device haptic playback. Private regression
+inputs and paired-control evidence remain outside the repository.
+
+The runtime package now installs a root `vrpreferences.json` with the project-
+selected 2160-resolution, minimum-90-Hz, no-half-framerate, motion-smoothing-
+off defaults expressed through Valve's documented per-app schema ([Valve
+documentation](https://partner.steamgames.com/doc/steamhardware/steamframe/vrpreferences)).
+These are requested defaults, not evidence that SteamVR applied them.
+Package allowlist/contents validation passes locally; actual Frame package
+installation and SteamVR settings verification still require the next hosted
+build and a later manual device check. No device configuration or SteamVR
+restart was changed for this source check.
 
 The verified current host checks are `starfox_vr_input_check`,
 `starfox_vr_runtime_tests`, `starfox_rumble_sequencer_tests`, the PCVR `--help`
-smoke, and the Original and EX full-state/audio progression tests at 90 Hz.
-The unverified rumble integration and parity reproducer are preserved outside
-the checkout in the owner's private development recovery directory; they are
-excluded from Git and packages. The macOS host cannot perform the Linux
+smoke, the Original and EX game-input regressions, and the Original/EX
+flat-versus-VR parity matrix described above. The matrix and regression logs
+were saved under `/tmp/starfox-frame-rumble-*` for this run. The macOS host
+cannot perform the Linux
 Clang/LLD cross-build; hosted Linux CI provides that evidence. One earlier
 macOS application save-failure fixture hit an Apple filesystem rename exception,
 while the corresponding Linux CI application regression passed.
 
 
-## Approved Layout A presentation milestone (pending integration)
+## Approved Layout A presentation milestone (source committed; device acceptance pending)
 
-Source base is `db2b7fb5b92483766ea36b7a38abec8a831b08cf`. The shared
-presentation change is uncommitted for coordinator review. No cartridge bytes,
+Source base is `1bd5713a04828c6c3a9543019cf27d8412afa715`. The shared
+presentation change is committed. No cartridge bytes,
 generated bundle, screenshots, or private regression inputs are in this diff.
 SDL/OpenXR/Vulkan pins and the native Vulkan backend are unchanged.
 

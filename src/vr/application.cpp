@@ -40,7 +40,10 @@
 #include "starfox/audio/stem_mixer.hpp"
 #include "starfox/audio/msu1_pack.hpp"
 #include "starfox/assets/shape_decoder.hpp"
+#include "starfox/simulation/rumble_sequencer.hpp"
 #include "starfox/vr/vulkan_depth_targets.hpp"
+#include <functional>
+#include <optional>
 #include <stdexcept>
 #include <chrono>
 #include <thread>
@@ -65,6 +68,7 @@ auto load_vr_backdrop(unsigned resource,std::string_view path) {
 struct LiveGame {
     starfox::assets::RomImage rom;
     starfox::assets::SymbolMap symbols;
+    starfox::simulation::RumbleSequencer rumble_sequencer;
     starfox::vr::CartridgeSave cartridge_save;
     starfox::simulation::GameSimulation game;
     starfox::audio::Spc700Audio audio;
@@ -77,6 +81,8 @@ struct LiveGame {
     starfox::vr::EnhancedLandscape enhanced_landscape;
     std::unique_ptr<starfox::vr::GameSceneHistory> history;
     std::unique_ptr<starfox::vr::GameFrameDriver> driver;
+    std::function<bool()> rumble_sink_available;
+    std::function<void(std::optional<starfox::simulation::RumbleEffect>)> rumble_sink;
     unsigned logic_ticks{};
     bool discard_audio{};
     LiveGame(const char* rom_path,const char* symbols_path,const char* msu_path,
@@ -87,7 +93,7 @@ struct LiveGame {
     // covers all simulation/render references; no extracted files are needed.
     LiveGame(starfox::assets::RomImage image,starfox::assets::SymbolMap table,const char* msu_path,
              const starfox::vr::ApplicationHost& host,const char* level="LEVEL1_1",bool discard=false)
-        :rom(std::move(image)),symbols(std::move(table)),
+        :rom(std::move(image)),symbols(std::move(table)),rumble_sequencer(symbols),
          cartridge_save(discard || symbols.find("PLANETSEQ2_L").empty()?std::filesystem::path{}:host.cartridge_save_path),
          game(rom,symbols,level,cartridge_save.initial(),true),models(rom,symbols,true,!discard),
          dialogue_layout(rom,symbols),enhanced_landscape(symbols),discard_audio(discard) {
@@ -118,9 +124,27 @@ struct LiveGame {
             if(!discard_audio && !output.push(mixed)) throw std::runtime_error(output.status());
             cartridge_save.synchronize(game.ex_save_ram());
             return audio.output_ports();
-        },history.get());
+        },history.get(),[this] {advance_rumble_source_raster();});
         if(native_intro) std::cout<<"Source intro ready; no intro or audio ticks skipped; VR startup panel available\n";
         else std::cout<<"Live game checkpoint ready after "<<warmup<<" ticks; silent source preroll complete\n";
+    }
+
+    void set_rumble_sink(std::function<bool()> available,
+        std::function<void(std::optional<starfox::simulation::RumbleEffect>)> output) {
+        rumble_sink_available=std::move(available);
+        rumble_sink=std::move(output);
+    }
+
+    void advance_rumble_source_raster() {
+        if(!rumble_sink) return;
+        if(!rumble_sink_available || !rumble_sink_available()) {
+            rumble_sink(std::nullopt);
+            return;
+        }
+        const bool enabled=!discard_audio && !game.paused()
+            && !game.runtime_options_open() && game.rumble()
+            && game.experience()==starfox::simulation::Experience::original;
+        rumble_sink(rumble_sequencer.advance(game.map(),enabled));
     }
 };
 }
@@ -436,6 +460,36 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         runtime.supports_frame_controller_interaction())) {
         std::cerr<<input.status()<<'\n';return 5;
     }
+    const auto bind_rumble_sink=[&](LiveGame& target) {
+        target.set_rumble_sink(
+            [&input,&host] {
+                return input.focused() && (input.haptics_available()
+                    || (host.desktop_rumble_available && host.desktop_rumble_available()));
+            },
+            [&input,&host](std::optional<starfox::simulation::RumbleEffect> effect) {
+                if(!effect || !effect->active()) {
+                    input.stop_haptics();
+                    if(host.stop_desktop_rumble) host.stop_desktop_rumble();
+                    return;
+                }
+                if(input.haptics_available()) {
+                    if(host.stop_desktop_rumble) host.stop_desktop_rumble();
+                    static_cast<void>(input.apply_haptics(*effect));
+                    return;
+                }
+                input.stop_haptics();
+                if(host.desktop_rumble_available && host.desktop_rumble_available()
+                    && host.desktop_rumble) {
+                    if(!host.desktop_rumble(effect->low_frequency,
+                        effect->high_frequency,effect->duration_ms)
+                        && host.stop_desktop_rumble)
+                        host.stop_desktop_rumble();
+                } else if(host.stop_desktop_rumble) {
+                    host.stop_desktop_rumble();
+                }
+            });
+    };
+    if(live) bind_rumble_sink(*live);
     struct RumbleShutdown {
         starfox::vr::OpenXrInput& input;
         const starfox::vr::ApplicationHost& host;
@@ -693,6 +747,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             starfox::assets::RomImage(initial_extended?bundle->starfox_ex_rom:bundle->original_rom),
                             starfox::assets::SymbolMap::parse(initial_extended?bundle->starfox_ex_symbols:bundle->original_symbols),msu_path,host,"INTROMAP")
                             :std::make_unique<LiveGame>(model_rom,model_symbols,msu_path,host,"INTROMAP");
+                        bind_rumble_sink(*restarted);
                         input.stop_haptics();
                         if(host.stop_desktop_rumble) host.stop_desktop_rumble();
                         live->output.close();
@@ -736,6 +791,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         auto selected=bundle?std::make_unique<LiveGame>(starfox::assets::RomImage(bundle->starfox_ex_rom),
                             starfox::assets::SymbolMap::parse(bundle->starfox_ex_symbols),msu_path,host,"INTROMAP")
                             :std::make_unique<LiveGame>(rom_name.c_str(),symbol_name.c_str(),msu_path,host,"INTROMAP");
+                        bind_rumble_sink(*selected);
                         if(selected->game.peek_meter_state().extended!=startup.extended)
                             throw std::runtime_error("Selected VR experience files contain the wrong cartridge");
                         input.stop_haptics();
@@ -776,6 +832,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         startup_release=false;
                     const bool playing=focused && !startup.open && !startup_release;
                     if(!live->output.set_active(playing)) throw std::runtime_error(live->output.status());
+                    if(!playing) {
+                        input.stop_haptics();
+                        if(host.stop_desktop_rumble) host.stop_desktop_rumble();
+                    }
                     // A new timestamp starts only after both previous eye
                     // submissions completed. Repeated eye/fence callbacks
                     // retain this exact simulation state and uploaded scene.
@@ -800,6 +860,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                                     starfox::assets::SymbolMap::parse(bundle->starfox_ex_symbols),nullptr,host,"LEVEL1_1",true)
                                     :std::make_unique<LiveGame>(alternate_rom.string().c_str(),alternate_symbols.string().c_str(),nullptr,host,"LEVEL1_1",true);
                             } else preview_game=std::make_unique<LiveGame>(live->rom,live->symbols,nullptr,host,"LEVEL1_1",true);
+                            bind_rumble_sink(*preview_game);
                         }
                         parked_game=std::move(live);live=std::move(preview_game);
                     }

@@ -18,6 +18,7 @@ struct ApplicationHost {
     std::function<VrControls()> desktop_controls;
     // Dual-band SDL fallback for cartridge-authored rumble when the active
     // OpenXR profile has no usable haptic output action.
+    std::function<bool()> desktop_rumble_available;
     std::function<bool(std::uint16_t,std::uint16_t,std::uint32_t)> desktop_rumble;
     std::function<void()> stop_desktop_rumble;
     std::filesystem::path cartridge_save_path;
