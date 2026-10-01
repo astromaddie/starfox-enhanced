@@ -251,10 +251,51 @@ presentation/input/camera/swapchain/session/runtime/rumble regressions),
 actual compositor quads, pause/map/briefing presentation, cockpit seat
 fit, and revised controller mapping require the next immutable CI/device run.
 
-The current hardware baseline is still `db2b7fb`, selected 72 Hz with two
+The earlier recorded hardware baseline was `db2b7fb`, selected 72 Hz with two
 1728x1728 eye swapchains. The runtime recommendation is 2160x2160 at 90 Hz;
 90 Hz is neither configured nor measured. The baseline native capture shows
 clear SHIELD/bombs without dialogue, while the older real dialogue capture
 established the portrait overlap addressed here. CPU log samples are not
 per-frame GPU/compositor performance evidence; no acceptance CSV/criteria
 report exists. The source presentation milestone makes no performance claim.
+
+## Gameplay HUD backing correction (7a47bd4 base)
+
+The wearer reported that the working `1bd5713` HUD had a black border occupying
+much of the viewing area. Its native readback and source path establish an
+added 254x78 dark panel across the gameplay HUD, including unused dialogue
+space. The ordinary packet pipeline draws that geometry opaquely; its stored
+95% alpha does not make it transparent. Fresh headset captures while the HMD
+was in standby were black and are not evidence of HUD appearance.
+
+The gameplay packet builder now omits only that decorative backing and border.
+Native portrait frames, text shadows, meter/bar artwork, and approved group
+positions remain unchanged. Separate menu and Exit panels remain unchanged;
+no blending pipeline, backend, dependency pin, control mapping, v6 preference,
+or rumble behavior changes are part of this correction.
+
+Private before/after native Vulkan readbacks are retained in the task's
+`frame-ui/hud-backing-fix` evidence directory. They draw the actual Original
+and EX source HUD packets over the same colored diagnostic checkerboard,
+through the production packet pipeline, mono target, GPU fence and readback.
+The checkerboard is explicitly a visibility diagnostic, not a cartridge world
+or headset capture. It makes restored unoccupied areas visible; source-art
+pixels outside the removed backing/border remain identical, and the menu
+readback is identical. The asset-free presentation regression also exercises
+the actual builder with inactive source artwork and rejects added geometry.
+
+The native scene checker, presentation check, and input check build; the two
+focused checks pass, as does the diff whitespace check. Wearer acceptance of
+the corrected gameplay HUD remains pending the next immutable Frame build,
+which must retain the committed `7a47bd4` rumble/default-preference work.
+No new headset, performance, or 90 Hz acceptance is claimed.
+
+A separate wearer report describes ships appearing closer than text that covers
+them. The wearer identifies the startup splash, controls adjustment, gameplay
+pause, and in-game dialogue. Pause/host quads are composed
+after the stereo projection without shared world depth, at a 1.75 m anchor;
+gameplay HUD packets also draw after models with depth disabled. Either can
+create conflicting stereo depth and visual occlusion for nearer geometry.
+Non-paused map/briefing/pregame panels instead suppress the eye world and draw
+the whole authored scene into one flat quad. This trace is a hypothesis boundary,
+not a reproduced defect or a depth-policy change in the backing correction.

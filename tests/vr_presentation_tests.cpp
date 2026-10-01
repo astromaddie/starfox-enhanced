@@ -4,6 +4,7 @@
 #include "starfox/vr/scene_interpolation.hpp"
 #include "starfox/vr/source_sprites.hpp"
 #include "starfox/render/hud_layout.hpp"
+#include "starfox/render/scaled_text_renderer.hpp"
 #include <cmath>
 #include <cstring>
 #include <deque>
@@ -159,6 +160,22 @@ int main() try {
             && world.geometry.vertices[0].position[1]==180,"Aim sprite moved with HUD");
         require(hud.geometry.vertices.size()==6 && hud.geometry.vertices[0].position[0]==39
             && hud.geometry.vertices[0].position[1]==190,"HUD label group offset wrong");
+    }
+    {
+        // No cartridge pixels are active: gameplay must not acquire an opaque
+        // decorative panel. This exercises the actual production HUD builder.
+        const starfox::assets::RomImage rom(std::vector<uint8_t>(0x8000));
+        const auto symbols=starfox::assets::SymbolMap::parse(
+            "MSCALECHARS $008000\nMARIOMSGS $008000\nFONT0WID $008000\n"
+            "FONT0FON $008000\nFONT0TRN $008000\nFACEDATA $008000\n");
+        starfox::render::ScaledTextRenderer text(rom,symbols);
+        GameSceneSnapshot scene;scene.ppu=std::make_shared<starfox::simulation::SnesPpuState>();
+        const auto packets=layout_a_instrument_packets(rom,symbols,scene,text);
+        for(const auto& packet:packets)
+            require(packet.geometry.vertex_view().empty() && packet.geometry.line_view().empty(),
+                "Inactive source HUD added geometry that obscures the world");
+        require(!layout_a_surface(true).geometry.vertex_view().empty(),
+            "Separate menu panel was removed with gameplay backing");
     }
     OpenXrSession session(api());start(session);
     OpenXrSwapchains chains({formats,swap_create,swap_destroy,images,acquire,image_wait,release});

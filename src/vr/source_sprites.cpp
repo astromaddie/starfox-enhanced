@@ -45,7 +45,8 @@ std::vector<DrawPacket> layout_a_instrument_packets(const assets::RomImage& rom,
     const GameSceneSnapshot& scene,render::ScaledTextRenderer& text,bool srgb) {
     const auto layout=layout_a_hud(scene.meters.extended);
     std::vector<DrawPacket> packets;
-    auto surface=layout_a_surface(false,0,srgb);surface.model=panel_matrix();packets.push_back(std::move(surface));
+    // Source portraits, glyph shadows and meters provide their own framing.
+    // Leave unoccupied gameplay HUD pixels open to the world.
     auto oam=source_sprite_packet(*scene.ppu,scene.display_brightness,{},srgb,&scene.meters,&layout,SourceSpritePass::hud);
     oam.model=panel_matrix();packets.push_back(std::move(oam));
     auto meters=source_meter_packet(scene.meters,scene.ppu->cgram,scene.display_brightness,srgb,256,false,&layout);
