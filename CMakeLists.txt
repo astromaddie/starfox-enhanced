@@ -1230,6 +1230,12 @@ if(STARFOX_BUILD_TESTS)
         list(APPEND STARFOX_SMOKE_BASELINE "STARFOX_TEST_${setting}=0")
     endforeach()
     enable_testing()
+    add_executable(starfox_bit_cast_compat_tests tests/bit_cast_compat_tests.cpp)
+    target_include_directories(starfox_bit_cast_compat_tests PRIVATE include)
+    target_compile_features(starfox_bit_cast_compat_tests PRIVATE cxx_std_20)
+    target_compile_definitions(starfox_bit_cast_compat_tests
+        PRIVATE STARFOX_FORCE_BIT_CAST_BUILTIN=1)
+    add_test(NAME starfox_bit_cast_compat_tests COMMAND starfox_bit_cast_compat_tests)
     if(STARFOX_BUILD_VR AND NOT ANDROID)
         add_executable(starfox_desktop_paths_tests
             tests/desktop_paths_tests.cpp src/vr/desktop_paths.cpp)

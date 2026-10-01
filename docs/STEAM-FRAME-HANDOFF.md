@@ -102,3 +102,17 @@ outside linker roots and are left as archived. The
 normalization report and its hash are included with hardware diagnostics and
 both artifact metadata files. The corrected ARM64 CI run remains required to
 confirm CMake and ELF dependency-closure behavior.
+
+The next ARM64 CI compile exposed a separate pinned-toolchain compatibility
+issue: the checksum-verified Sniper SDK's `usr/include/c++/10/bit` contains no
+`std::bit_cast` declaration or `__cpp_lib_bit_cast` feature macro, although the
+project uses C++20 bit casts in state serialization and rendering. Production
+call sites now use a constrained `starfox::bit_cast` adapter, selecting the
+standard implementation when available and Clang's builtin with this older
+libstdc++. A focused test forces the builtin path and checks size/trivial-copy
+constraints, signed and floating-point bit patterns, and exact serialized
+bytes. On the macOS host, both the standard and forced-builtin test variants
+passed; `starfox_pcvr`, `starfox_vr_game_input_check`, and the compatibility
+test target built, the PCVR help smoke passed, and the private Original and EX
+full-state/audio progression checks passed. These host results do not verify
+the Clang 18/GCC 10 ARM64 compilation; the next Linux CI run must confirm it.

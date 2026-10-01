@@ -1,4 +1,5 @@
 #include "starfox/vr/vulkan_draw_packets.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/backdrop_texture.hpp"
 #include "starfox/vr/source_span_layout.hpp"
 #include "starfox/vr/source_models.hpp"
@@ -203,7 +204,7 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
                                 const auto value=static_cast<int32_t>(texture_words[start+word]);
                                 if(value< -32768 || value>32767) throw std::runtime_error("Invalid GPU dust matrix");
                             } else {
-                                const float value=std::bit_cast<float>(texture_words[start+word]);
+                                const float value=starfox::bit_cast<float>(texture_words[start+word]);
                                 if(!std::isfinite(value) || (word<3?std::abs(value)>65536.F:(value<0 || value>1)))
                                     throw std::runtime_error("Invalid GPU dust camera/colour");
                             }
@@ -232,7 +233,7 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
                         const auto receiver=size_t(v.texture[0])+272+16384;
                         if((v.texture[3]&~(268435456U|10U)) || receiver>=texture_words.size())
                             throw std::runtime_error("Invalid GPU landscape receiver payload");
-                        const auto height=std::bit_cast<float>(texture_words[receiver]);
+                        const auto height=starfox::bit_cast<float>(texture_words[receiver]);
                         if(!std::isfinite(height) || height>=0 || height< -8.F)
                             throw std::runtime_error("Invalid GPU landscape receiver height");
                     }

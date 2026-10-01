@@ -1,4 +1,5 @@
 #include "starfox/vr/source_models.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
 #include <bit>
 #include <cmath>
@@ -54,7 +55,7 @@ bool text_packet(const assets::RomImage& rom,uint32_t font,uint32_t messages,
     if(!model) {error="Invalid scaled text transform";return false;}
     packet.model=*model;
     if(object.colour_table<0x8000) return true;
-    const int size=127+std::bit_cast<int8_t>(object.texture_scroll_x);
+    const int size=127+starfox::bit_cast<int8_t>(object.texture_scroll_x);
     std::vector<uint8_t> tokens;
     for(uint32_t i=0;i<256;++i) {
         const auto token=rom.read8((messages&0xff0000U)+object.colour_table+i);
@@ -324,7 +325,7 @@ DrawPacket SourceModels::grid_pose(const GameSceneSnapshot& scene,const timing::
         // carry the discarded sub-unit camera motion into the eye shader.
         for(const double value:{camera.x,camera.y,camera.z}) {
             const auto remainder=float(value-std::trunc(value));
-            packet.geometry.texels.push_back(std::bit_cast<uint32_t>(-remainder));
+            packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(-remainder));
         }
         SceneVertex base{};
         render::FaceMaterial material{{14,14,false},nullptr};
@@ -411,13 +412,13 @@ DrawPacket SourceModels::dust_pose(const GameSceneSnapshot& scene,const timing::
             || scene.flow==simulation::GameFlowState::controls_choice;
         if(controls) packet.model=source_layer_matrix(float(scene.source_vanishing_point[0])+16.F,
             float(scene.source_vanishing_point[1])+16.F).value();
-        for(double value:{camera.x,camera.y,camera.z}) packet.geometry.texels.push_back(std::bit_cast<uint32_t>(float(value)));
+        for(double value:{camera.x,camera.y,camera.z}) packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(float(value)));
         for(auto value:m) packet.geometry.texels.push_back(uint32_t(int32_t(value)));
         for(unsigned index=0;index<64;++index) {
             const auto shade=rom_->read8(star_colours_+index);
             SceneVertex colour{};render::FaceMaterial material{{shade,shade,false},nullptr};
             if(!apply_scene_material(colour,material,palette,112,1,srgb)) throw std::runtime_error("Invalid GPU dust colour");
-            for(float value:colour.color) packet.geometry.texels.push_back(std::bit_cast<uint32_t>(value));
+            for(float value:colour.color) packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(value));
         }
         if(dust_vertices_ && !dust_vertices_->empty()
             && bool(dust_vertices_->front().texture[3]&16384U)==controls && dust_source_points_.size()==scene.dust_point_count
@@ -574,7 +575,7 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
             pose.collapse_to_axis_line=scene.flow==simulation::GameFlowState::intro
                 && intro_laser_shape_ && object.shape==intro_laser_shape_ && pose.z<1024.;
             if(pose.simple_scaled_sprite) {
-                auto adjustment=static_cast<int16_t>(std::bit_cast<int8_t>(object.texture_scroll_x));
+                auto adjustment=static_cast<int16_t>(starfox::bit_cast<int8_t>(object.texture_scroll_x));
                 for(unsigned shift=0;shift<header.shift;++shift) adjustment=simulation::add16(adjustment,adjustment);
                 auto diameter=simulation::add16(header.size,adjustment);
                 diameter=simulation::add16(diameter,diameter);

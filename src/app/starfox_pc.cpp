@@ -1,4 +1,5 @@
 #include "starfox/audio/spc700_audio.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/effects.hpp"
 #include "starfox/render/frame_persistence.hpp"
 #include <functional>
@@ -5456,7 +5457,7 @@ std::int16_t interpolate_source_word(
     const auto value = static_cast<std::int64_t>(std::lround(
         static_cast<double>(previous)
         + source_word_difference(current, previous) * alpha));
-    return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+    return starfox::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
 }
 
 starfox::simulation::CircleEffectState interpolate_circle_effect(
@@ -10975,12 +10976,12 @@ int main(int argc, char** argv) {
                 if ((object.strategy_flags[0] & 0x40U) != 0U) {
                     if(record_models && &target==&superfx_frame) {
                         auto text=text_renderer.prepare_projected(object.colour_table,object.extended[21],
-                            std::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item,false));
+                            starfox::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item,false));
                         if(!text.glyphs.empty() && std::getenv("STARFOX_TRACE_GPU")) std::cerr<<"GPU projected text recorded\n";
                         recorded_scene.append_text(raster_commands,{std::move(text),target.draw_scale()});
                     } else {
                         text_renderer.draw(object.colour_table, object.extended[21],
-                            std::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item, false), target);
+                            starfox::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item, false), target);
                     }
                     continue;
                 }
@@ -11024,7 +11025,7 @@ int main(int argc, char** argv) {
                 }
                 if ((object.strategy_flags[0] & 0x20U) != 0U) {
                     auto size_adjustment = static_cast<std::int16_t>(
-                        std::bit_cast<std::int8_t>(object.texture_scroll_x));
+                        starfox::bit_cast<std::int8_t>(object.texture_scroll_x));
                     for (std::uint8_t shift = 0; shift < base_header.shift; ++shift) {
                         size_adjustment = starfox::simulation::add16(
                             size_adjustment, size_adjustment);
