@@ -52,10 +52,11 @@ jobs:
               starfox_vr_swapchain_check starfox_vr_session_check starfox_vr_device_check \
               starfox_vr_targets_check starfox_vr_runtime_tests starfox_vr_timestamp_check \
               starfox_vr_profile_output_check \
+              starfox_vr_packet_check starfox_vr_decal_check starfox_vr_mesh_check \
               starfox_rumble_sequencer_tests \
             --parallel 2
           ctest --test-dir "$RUNNER_TEMP/starfox-frame-host-vr" --output-on-failure \
-            -R '^starfox_(pcvr_help|vr_profile_cli|vr_profile_output_check|desktop_paths_tests|vr_application_tests|vr_presentation_check|vr_input_check|vr_camera_check|vr_swapchain_check|vr_session_check|vr_device_check|vr_targets_check|vr_runtime_tests|vr_timestamp_math|vr_timestamp_query|vr_timestamp_query_required|rumble_sequencer_tests|steam_frame_cmake_guards)$'
+            -R '^starfox_(pcvr_help|vr_profile_cli|vr_profile_output_check|desktop_paths_tests|vr_application_tests|vr_presentation_check|vr_input_check|vr_camera_check|vr_swapchain_check|vr_session_check|vr_device_check|vr_targets_check|vr_packet_check|vr_decal_check|vr_mesh_check|vr_runtime_tests|vr_timestamp_math|vr_timestamp_query|vr_timestamp_query_required|rumble_sequencer_tests|steam_frame_cmake_guards)$'
           "$RUNNER_TEMP/starfox-frame-host-vr/starfox_pcvr" --help
 
   steam-frame-arm64:

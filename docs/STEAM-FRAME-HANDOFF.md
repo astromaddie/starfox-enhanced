@@ -406,3 +406,64 @@ The first profiling workflow (`36850010195`, source `1e5fa21`) failed in the
 Linux compile because the timestamp command header used `std::uint32_t` and
 `std::uint64_t` without directly including `<cstdint>`. The follow-up adds that
 include; native query readback and all hosted checks still require the rerun.
+
+The follow-up `71d67e5` workflow (`36850395405`) passed all four jobs: Linux
+shared regressions, ARM64 packaging, Windows PCVR, and Quest AAR/Prefab. Linux
+selected `/usr/share/vulkan/icd.d/lvp_icd.json` and passed the required native
+timestamp-query test within its 18/18 checks. Runtime artifact `11156030722`
+and diagnostic artifact `11154934777` matched their GitHub archive digests;
+immutable package/checksum/allowlist validation and AArch64 ELF inspection
+passed. This verifies host query readback, not Frame GPU performance. No new
+package was deployed after the restart; its USB network connection is absent.
+
+## Tower logo coplanar inset correction (after 71d67e5)
+
+The reported tower is consistent with authored `BU_7`: a flared base, tall
+rectangular wall, two top marker lines, and an inset textured sign. Original
+face 7 is a solid wall at source Z=40 (X=-20..20, Y=-118..-10); face 8 is the
+textured sign on that same plane (X=-15..15, Y=-113..-83). The old native decal
+classification required identical vertex sets. The actual Original production
+packet therefore emitted six textured vertices with zero decal flags, and the
+resident path emitted face 8 with flags=1, without its decal bit.
+
+Both paths now share a local-geometry containment check: an inset textured
+polygon must be coplanar with and contained by a convex solid polygon, with a
+common transform in the resident representation. Exact vertex-set overlays
+remain supported, including duplicated vertex records. The added containment
+rule rejects noncoplanar, protruding, disjoint, degenerate and concave backing
+cases; fragmented
+faces remain excluded. Ordinary textures receive no general depth bias. The
+existing shader depth adjustment is unchanged. After the correction, actual
+Original `BU_7` emits six textured vertices with six decal flags; resident face
+8 has flags=17. This closes the demonstrated classification gap; it does not
+yet establish that all wearer-observed flicker has been eliminated.
+
+Local CPU validation: `starfox_vr_decal_check` and `starfox_vr_mesh_check` pass
+(2/2 CTest), and `starfox_pcvr` builds. The decal executable also passes with
+private Original and EX ROM/symbol inputs: real `BU_7` through CPU packets and
+clipped/unclipped resident preparation, displaced and protruding logo negative
+cases, and explosion exclusion. Asset-free tests cover identical faces, inset
+quads/triangles, winding, tilted planes, scale, edge containment, separated and
+disjoint surfaces, concavity and different resident transforms. Steam Frame's
+Linux host workflow now builds/runs these checks plus the existing broader
+packet check, since both shared packet-preparation paths changed. Hosted
+results are pending. The local broader packet check aborts at the pre-existing
+`Invalid axis upload region` exception case both before and after rebuilding;
+it is not reported as passing, and its assertions remain intact.
+
+Private evidence remains under `frame-ui/tower-flicker` in the October 1
+visualization workspace: `packet-before`, `packet-after.cpp`, `packet-after`,
+`verification.txt`, and `bu7-front-software.png`. The last is an inspected
+source-software specimen showing the winged logo, wall and flared base; it is
+identification evidence, not native depth/readback or headset flicker proof.
+Its camera uses source angle units (65536 per turn); the older
+`bu7-software.png` used a nearly zero yaw and is not useful match evidence.
+No private ROM, symbol data, captures or artwork enter the repository/package.
+
+The Mac restart cleared the earlier `/tmp` native captures, checkpoints and
+run logs. The wearer's positive depth report on `915774e` remains a reported
+observation, but those temporary image/provenance paths are no longer retained.
+The previously hanging macOS Vulkan/MoltenVK/query/negative-exception probes
+were not retried. Native rendered depth/readback, still-head/pause behavior,
+and wearer acceptance of this tower correction remain pending. No performance
+improvement or frame-time acceptance is claimed.
