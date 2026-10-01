@@ -350,6 +350,21 @@ void GameSceneHistory::capture() {
             || next->flow==simulation::GameFlowState::intro
             || next->flow==simulation::GameFlowState::stage_results);
     next->model_palette=game_.palette_words();next->cgram=next->ppu->cgram;
+    if(game_.objects().is_active(next->player)) {
+        const auto& player=game_.objects().at(next->player);
+        render::ObjectPresentationSnapshot reference;
+        reference.transform={player.world_x,player.world_y,player.world_z,
+            uint16_t(player.rotation_x<<8U),uint16_t(player.rotation_y<<8U),uint16_t(player.rotation_z<<8U)};
+        reference.rotation_matrix=simulation::transpose_q15(simulation::rotation_matrix_q15(trig_,
+            simulation::wrap16(-int32_t(reference.transform.pitch)),
+            simulation::wrap16(-int32_t(reference.transform.yaw)),
+            simulation::wrap16(-int32_t(reference.transform.roll))));
+        reference.strategy_address=player.strategy_address;reference.shape=player.shape;
+        reference.type=player.type;reference.generation=game_.objects().generation(next->player);
+        next->pilot_reference=reference;
+        next->pilot_tracking=player.strategy_address && (player.strategy_address==tracking_strategies_[0]
+            || player.strategy_address==tracking_strategies_[1]);
+    }
     next->transforms=render::capture_object_snapshots(game_.objects(),trig_);
     if(const auto player=next->transforms.find(next->player);player!=next->transforms.end()) {
         const auto strategy=player->second.strategy_address;

@@ -76,6 +76,9 @@ VrControls select_vr_control_sources(
         selected.reset_pressed = openxr.reset_pressed;
     else if ((desktop.active_actions & reset_chord) == reset_chord)
         selected.reset_pressed = desktop.reset_pressed;
+    const auto& confirmation=openxr.menu_confirm_active?openxr:desktop;
+    selected.menu_confirm=confirmation.menu_confirm;
+    selected.menu_confirm_active=confirmation.menu_confirm_active;
     return selected;
 }
 
@@ -143,6 +146,7 @@ void OpenXrInput::close() noexcept {
     actions_ = {};
     hands_ = {};
     haptic_profiles_ = {};
+    frame_profile_ = {};
     haptic_bound_hands_ = {};
     haptic_started_hands_ = {};
     haptic_profile_count_ = 0U;
@@ -211,6 +215,8 @@ bool OpenXrInput::initialize(
                 XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
             info.interactionProfile = path(profile);
             const auto profile_path = info.interactionProfile;
+            if(std::string_view(profile)=="/interaction_profiles/valve/frame_controller_valve")
+                frame_profile_=profile_path;
             const bool has_haptic = std::any_of(bindings.begin(),bindings.end(),
                 [](const auto& binding) { return binding.first == haptic; });
             info.countSuggestedBindings = static_cast<std::uint32_t>(values.size());
@@ -267,10 +273,10 @@ bool OpenXrInput::initialize(
         if (frame_interaction_enabled) {
             suggest("/interaction_profiles/valve/frame_controller_valve", {
                 {steer, "/user/hand/left/input/thumbstick"},
-                {fire, "/user/hand/right/input/a/click"},
+                {fire, "/user/hand/right/input/x/click"},
                 {bomb, "/user/hand/right/input/b/click"},
-                {boost, "/user/hand/right/input/x/click"},
-                {brake, "/user/hand/right/input/y/click"},
+                {boost, "/user/hand/right/input/y/click"},
+                {brake, "/user/hand/right/input/a/click"},
                 {menu, "/user/hand/right/input/menu/click"},
                 {roll_left, "/user/hand/left/input/bumper/click"},
                 {roll_right, "/user/hand/right/input/bumper/click"},
@@ -350,9 +356,12 @@ bool OpenXrInput::poll(bool focused) {
         if (XR_FAILED(sync_result)) return fail_poll(sync_result, "Sync actions");
 
         std::array<bool,2> haptic_bound{};
+        bool frame_right=false;
         for (std::size_t hand = 0; hand < hands_.size(); ++hand) {
             XrInteractionProfileState profile{XR_TYPE_INTERACTION_PROFILE_STATE};
             if (XR_SUCCEEDED(api_.current_profile(session_, hands_[hand], &profile))) {
+                if(hand==1) frame_right=frame_profile_!=XR_NULL_PATH
+                    && profile.interactionProfile==frame_profile_;
                 haptic_bound[hand] = std::find(haptic_profiles_.begin(),
                     haptic_profiles_.begin() + haptic_profile_count_,
                     profile.interactionProfile)
@@ -406,6 +415,9 @@ bool OpenXrInput::poll(bool focused) {
         if (XR_FAILED(result)) return fail_poll(result, "Read button");
         result = read_button(brake, next.brake, action_active);
         if (XR_FAILED(result)) return fail_poll(result, "Read button");
+        next.menu_confirm=frame_right?next.brake:next.fire;
+        next.menu_confirm_active=(next.active_actions & vr_control_bit(
+            frame_right?VrControlAction::brake:VrControlAction::fire))!=0;
         bool menu_active{};
         result = read_button(menu, next.menu, menu_active);
         if (XR_FAILED(result)) return fail_poll(result, "Read button");

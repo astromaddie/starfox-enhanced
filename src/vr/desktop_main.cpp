@@ -82,10 +82,14 @@ public:
             const float scale=(std::min(radius,1.F)-.18F)/(.82F*radius);
             controls.steer={x*scale,y*scale};
         }
-        controls.fire=button(SDL_GAMEPAD_BUTTON_SOUTH);
-        controls.bomb=button(SDL_GAMEPAD_BUTTON_EAST);
-        controls.boost=button(SDL_GAMEPAD_BUTTON_WEST);
-        controls.brake=button(SDL_GAMEPAD_BUTTON_NORTH);
+#if defined(STARFOX_STEAM_FRAME)
+        constexpr bool frame_face_buttons=true;
+#else
+        constexpr bool frame_face_buttons=false;
+#endif
+        starfox::vr::desktop_face_buttons(controls,frame_face_buttons,
+            button(SDL_GAMEPAD_BUTTON_SOUTH),button(SDL_GAMEPAD_BUTTON_EAST),
+            button(SDL_GAMEPAD_BUTTON_WEST),button(SDL_GAMEPAD_BUTTON_NORTH));
         controls.menu=button(SDL_GAMEPAD_BUTTON_START);
         controls.select=button(SDL_GAMEPAD_BUTTON_BACK);
 #if defined(STARFOX_STEAM_FRAME)

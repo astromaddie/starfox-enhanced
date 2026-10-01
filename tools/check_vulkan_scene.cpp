@@ -717,19 +717,32 @@ int main(int argc,char** argv) try {
         menu.alternate_available=true;menu.selection=1;
         const bool sky_options=grid_mode.ends_with(":two-d");
         if(sky_options) {menu.page=StartupMenu::Page::two_d;menu.selection=3;menu.enhanced_sky=true;}
-        std::array<uint16_t,256> palette{};palette[1]=0x7fff;palette[2]=0x03ff;
-        const auto add=[&](std::u32string_view text,int y,uint8_t ink) {
-            auto packet=menu.language==0 || menu.language==5
-                ?source_ui_text_packet(rom,symbols,std::string(text.begin(),text.end()),16,y,240,ink,palette)
-                :source_unicode_ui_text_packet(rom,symbols,text,16,y,ink,palette);
-            packet.model=source_layer_matrix(128,112,2.F).value();live_packets.push_back(std::move(packet));
-        };
-        add(menu.translate(sky_options?menu.title():"STAR FOX VR"),35,1);
-        const auto labels=menu.localized_labels();
-        for(unsigned i=0;i<(sky_options?labels.size():4);++i)
-            add((i==menu.selection?U"> ":U"  ")+labels[i],67+int(i)*(sky_options?18:26),i==menu.selection?2:1);
-        if(menu.language==0 || menu.language==5) add(U"STICK: MOVE   FIRE: SELECT",185,1);
-        else {const auto help=menu.localized_help();add(help[0],183,1);add(help[1],201,1);}
+        if(grid_mode.ends_with(":presentation")) {menu.page=StartupMenu::Page::presentation;menu.selection=4;}
+        if(grid_mode.ends_with(":exit")) {menu.page=StartupMenu::Page::exit_confirmation;menu.selection=0;}
+        if(grid_mode.ends_with(":runtime")) menu.open_runtime();
+        if(grid_mode.ends_with(":hud")) {
+            starfox::simulation::GameSimulation game(rom,symbols,"LEVEL1_1",{},true);
+            game.set_timing_mode(starfox::simulation::TimingMode::unlocked_20_fps);
+            starfox::audio::Spc700Audio audio;
+            const auto advance=[&] {const auto tick=game.tick({});(void)audio.render_logic_tick(tick.audio_port_writes);game.synchronize_apu_output_ports(audio.output_ports());};
+            const auto checkpoint=symbols.find("MAPRESTART").at(0);unsigned ticks=0;
+            while(!game.map().peek_ram_word(checkpoint).value() && ticks<3000) {advance();++ticks;}
+            require(ticks<3000,"Layout A source checkpoint did not start");
+            unsigned visible=0;
+            for(;visible<300;++visible) {advance();if(game.peek_meter_state().enabled && game.dialogue_state().active && game.dialogue_state().text_visible) break;}
+            require(visible<300,"Layout A source communication did not appear");
+            GameSceneHistory history(game,rom,symbols);
+            starfox::render::ScaledTextRenderer text(rom,symbols);
+            live_packets=layout_a_instrument_packets(rom,symbols,*history.current(),text);
+            // Read back the exact submitted panel pixels, before its physical
+            // quad placement. This is native GPU evidence, not a headset view.
+            const auto panel=panel_matrix();Matrix4 inverse=identity_matrix;
+            inverse[0]=1/panel[0];inverse[5]=1/panel[5];
+            inverse[12]=-panel[12]/panel[0];inverse[13]=-panel[13]/panel[5];inverse[14]=-panel[14];
+            for(auto& packet:live_packets) packet.model=multiply_matrix(inverse,packet.model);
+            std::cout<<"Layout A live source HUD: checkpoint "<<ticks<<", dialogue after "<<visible+1<<" ticks; cartridge "
+                <<(history.current()->meters.extended?"EX":"Original")<<"\n";
+        } else live_packets=layout_a_menu_packets(rom,symbols,menu);
     } else if(briefing_text) {
         const auto rom=starfox::assets::RomImage::load(argv[2]);
         const auto symbols=starfox::assets::SymbolMap::load(argv[3]);
@@ -2196,7 +2209,7 @@ int main(int argc,char** argv) try {
     };
     // Menu layout captures need enough eye resolution to inspect localized
     // glyphs. Keep the pixel-exact synthetic suite at its original resolution.
-    const uint32_t width=startup_menu?1536U:256U,height=width;
+    const uint32_t width=startup_menu?1024U:256U,height=startup_menu?896U:width;
     VkImageCreateInfo image_info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     image_info.imageType=VK_IMAGE_TYPE_2D;image_info.format=VK_FORMAT_R8G8B8A8_UNORM;
     image_info.extent={width,height,1};image_info.mipLevels=image_info.arrayLayers=1;
@@ -4551,7 +4564,7 @@ int main(int argc,char** argv) try {
         if(sample==12 && cartridge_sample) {
             DrawPacket packet;packet.model=cartridge_model;packet.geometry=cartridge;
             const auto upload=live?std::span<const DrawPacket>(live_packets):std::span<const DrawPacket>(&packet,1);
-            require(packet_scene.initialize(device,vkGetDeviceProcAddr,memory_properties,targets.render_pass(),upload,{},!(planet_screen || source_layers || source_oam)),packet_scene.status().c_str());
+            require(packet_scene.initialize(device,vkGetDeviceProcAddr,memory_properties,targets.render_pass(),upload,{},!(startup_menu || planet_screen || source_layers || source_oam)),packet_scene.status().c_str());
         }
         if(visibility_case>=0 && sample%2==0) {
             auto tested=triangle;
@@ -4747,6 +4760,7 @@ int main(int argc,char** argv) try {
         if(cartridge_sample && explicit_stage && (grid_mode.ends_with("@island-focus") || grid_mode.ends_with("@moon-focus")))
             view.fov={-.12F,.12F,.12F,-.12F};
         auto camera=eye_camera(view,1,.05F);require(camera.has_value(),"Invalid eye camera");
+        if(startup_menu) camera=panel_raster_camera();
         if(cartridge_sample && explicit_stage && grid_mode.find("@effect-sepia")!=std::string_view::npos)
             camera->effects={8,100,0,0};
         if(cartridge_sample && explicit_stage) {

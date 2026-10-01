@@ -54,10 +54,10 @@ XrResult XRAPI_PTR suggest(XrInstance,const XrInteractionProfileSuggestedBinding
             == "/interaction_profiles/valve/frame_controller_valve");
         const std::array<std::pair<unsigned,const char*>,19> expected{{
             {0,"/user/hand/left/input/thumbstick"},
-            {1,"/user/hand/right/input/a/click"},
+            {1,"/user/hand/right/input/x/click"},
             {2,"/user/hand/right/input/b/click"},
-            {3,"/user/hand/right/input/x/click"},
-            {4,"/user/hand/right/input/y/click"},
+            {3,"/user/hand/right/input/y/click"},
+            {4,"/user/hand/right/input/a/click"},
             {5,"/user/hand/right/input/menu/click"},
             {6,"/user/hand/left/input/bumper/click"},
             {7,"/user/hand/right/input/bumper/click"},
@@ -244,7 +244,7 @@ int main() try {
         const auto softened=menu.gameplay_controls(steer);
         require(std::abs(softened.steer.x-.4F)<.001F
             && std::abs(softened.steer.y+.2F)<.001F);
-        menu.selection=9;click();require(menu.page==Page::main && menu.selection==3);
+        menu.selection=10;click();require(menu.page==Page::main && menu.selection==3);
         menu.alternate_available=true;menu.selection=0;click();require(menu.extended && menu.selected_level==0);
         menu.open_runtime();require(menu.selection==4 && menu.page==Page::main && menu.labels()[4]=="RESUME");
         menu.selection=0;click();require(menu.extended && menu.labels()[0].find("LOCKED")!=std::string::npos);
@@ -279,12 +279,39 @@ int main() try {
         std::array<uint8_t,16> legacy{};std::copy(preferences.begin(),preferences.begin()+16,legacy.begin());
         legacy[4]=1;legacy[11]&=1;legacy[15]&=1;
         StartupMenu migrated;require(migrated.restore_preferences(legacy) && !migrated.ray_tracing && !migrated.infinite_lives);
-        auto version4=preferences;version4[4]=4;version4[11]&=3;
+        std::array<uint8_t,20> version4{};std::copy_n(preferences.begin(),20,version4.begin());version4[4]=4;version4[11]&=3;
         require(migrated.restore_preferences(version4) && !migrated.enhanced_sky
             && migrated.model_effect==menu.model_effect && migrated.world_effect==menu.world_effect);
         require(restored.open && !restored.runtime && !restored.extended
             && !restored.alternate_available && restored.page==Page::main
             && restored.selection==0 && restored.selected_level==0);
+        require(!migrated.presentation.cockpit && migrated.presentation.translation_scale()==1.F && migrated.presentation.scale()==1.F);
+        for(unsigned version=1;version<=5;++version) {
+            auto old=preferences;old[4]=uint8_t(version);old[11]&=version==1?1:version<5?3:255;old[15]&=version<3?1:3;
+            migrated.presentation={true,false,5,50,-50,100};
+            require(migrated.restore_preferences(std::span(old).first(version<4?16:20)));
+            require(!migrated.presentation.cockpit && migrated.presentation.translation_scale()==1.F && migrated.presentation.scale()==1.F
+                && migrated.presentation.origin_x==0 && migrated.presentation.origin_y==0 && migrated.presentation.origin_z==0);
+        }
+        StartupMenu presentation_menu;presentation_menu.page=Page::presentation;
+        presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.presentation.cockpit);
+        presentation_menu.selection=6;presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.recenter_revision==1);
+        presentation_menu.presentation={true,false,5,-100,100,35};
+        require(migrated.restore_preferences(presentation_menu.preferences()) && migrated.presentation.origin_z==35
+            && migrated.presentation.origin_x==-100 && migrated.presentation.translation_scale()==0.F && migrated.presentation.scale()==2.F);
+        presentation_menu.presentation.head_translation=3;
+        require(migrated.restore_preferences(presentation_menu.preferences())
+            && migrated.presentation.translation_scale()==1.5F);
+        presentation_menu.page=Page::main;presentation_menu.selection=5;
+        presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.page==Page::exit_confirmation && presentation_menu.selection==0 && !presentation_menu.exit_requested);
+        presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.page==Page::main && !presentation_menu.exit_requested);
+        presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        presentation_menu.selection=1;presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.exit_requested);
         // Invalid fields reject the entire record without partial mutation.
         for(size_t index=0;index<preferences.size();++index) {
             auto corrupt=preferences;corrupt[index]=255;
@@ -379,6 +406,12 @@ int main() try {
     mock_profiles={path_value("/interaction_profiles/valve/frame_controller_valve"),
         path_value("/interaction_profiles/valve/frame_controller_valve")};
     require(input.poll(true) && input.haptics_available());
+    independent_buttons=true;button_states={};button_states[5]=true; // Frame A -> brake
+    require(input.poll(true) && input.controls().brake && !input.controls().fire
+        && input.controls().menu_confirm && input.controls().menu_confirm_active);
+    button_states[5]=false;button_states[2]=true; // Frame X -> fire
+    require(input.poll(true) && input.controls().fire && !input.controls().menu_confirm);
+    independent_buttons=false;button_states={};
     require(input.apply_haptics(authored)); // The advertised Frame binding is usable too.
     mock_profiles={XR_NULL_PATH,XR_NULL_PATH};
     const auto applies_before_unbound=haptic_applies;
@@ -409,6 +442,26 @@ int main() try {
         pad.menu=true;pad.menu_pressed=true;
         selected=select_vr_control_sources(xr,pad);
         require(!selected.fire && selected.menu && selected.menu_pressed);
+
+        for(bool frame:{false,true}) {
+            VrControls face;
+            desktop_face_buttons(face,frame,true,false,false,false);
+            require(face.menu_confirm && face.menu_confirm_active);
+            require(face.fire==!frame && face.brake==frame && !face.boost && !face.bomb);
+            desktop_face_buttons(face,frame,false,false,true,false);
+            require(!face.menu_confirm && face.fire==frame && face.boost==!frame);
+            desktop_face_buttons(face,frame,false,false,false,true);
+            require(face.boost==frame && face.brake==!frame);
+        }
+        xr.menu_confirm_active=true;xr.menu_confirm=false;
+        pad.menu_confirm_active=true;pad.menu_confirm=true;
+        require(!select_vr_control_sources(xr,pad).menu_confirm);
+        xr.menu_confirm_active=false;
+        require(select_vr_control_sources(xr,pad).menu_confirm);
+        StartupMenu physical_menu;physical_menu.selection=5;
+        VrControls physical_a;desktop_face_buttons(physical_a,true,true,false,false,false);
+        physical_menu.sample({},true);physical_menu.sample(physical_a,true);
+        require(physical_menu.page==StartupMenu::Page::exit_confirmation);
 
         DesktopControlEdges edges;
         VrControls held;

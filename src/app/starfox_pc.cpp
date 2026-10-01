@@ -3156,54 +3156,6 @@ public:
                 }
             }
         }
-        if (effects.confirmation_overlay != nullptr) {
-            const auto& overlay = *effects.confirmation_overlay;
-            const auto left = (static_cast<std::int32_t>(framebuffer.width())
-                - static_cast<std::int32_t>(overlay.width())) / 2;
-            const auto top = (static_cast<std::int32_t>(framebuffer.height())
-                - static_cast<std::int32_t>(overlay.height())) / 2;
-            const auto right = left + static_cast<std::int32_t>(overlay.width());
-            const auto bottom = top + static_cast<std::int32_t>(overlay.height());
-            const auto paint = [this, &framebuffer](
-                                   std::int32_t x, std::int32_t y,
-                                   std::uint8_t value) {
-                if (x < 0 || y < 0
-                    || x >= static_cast<std::int32_t>(framebuffer.width())
-                    || y >= static_cast<std::int32_t>(framebuffer.height())) {
-                    return;
-                }
-                const auto scale = framebuffer.draw_scale();
-                const auto stored_width = static_cast<std::size_t>(
-                    framebuffer.stored_width());
-                const auto origin_x = static_cast<std::uint32_t>(x) * scale;
-                const auto origin_y = static_cast<std::uint32_t>(y) * scale;
-                for (std::uint32_t row = 0; row < scale; ++row) {
-                    for (std::uint32_t column = 0; column < scale; ++column) {
-                        const auto pixel = (static_cast<std::size_t>(
-                            origin_y + row) * stored_width
-                            + origin_x + column) * 4U;
-                        rgba_[pixel] = value;
-                        rgba_[pixel + 1U] = value;
-                        rgba_[pixel + 2U] = value;
-                        rgba_[pixel + 3U] = 255U;
-                    }
-                }
-            };
-            for (auto y = top - 4; y < bottom + 4; ++y) {
-                for (auto x = left - 6; x < right + 6; ++x) {
-                    const auto border = x == left - 6 || x == right + 5
-                        || y == top - 4 || y == bottom + 3;
-                    paint(x, y, border ? 255U : 0U);
-                }
-            }
-            for (std::uint32_t y = 0U; y < overlay.height(); ++y) {
-                for (std::uint32_t x = 0U; x < overlay.width(); ++x) {
-                    if (overlay.get(x, y) == 0U) continue;
-                    paint(left + static_cast<std::int32_t>(x),
-                        top + static_cast<std::int32_t>(y), 255U);
-                }
-            }
-        }
         starfox::render::GpuEffectSettings style_gpu;
 #if defined(__ANDROID__)
         profile_stage(1U);
@@ -3252,7 +3204,7 @@ public:
         }
         // No subsequent CPU composition is needed on this path. SDL samples
         // the compute result directly; screenshots/history read back on demand.
-        if(renderer_mode_==starfox::simulation::RendererMode::gpu
+        if(renderer_mode_==starfox::simulation::RendererMode::gpu && !effects.confirmation_overlay
             && (!std::getenv("STARFOX_GPU_SAFE_EFFECTS") || gpu_safe_effects)) {
             // Touch controls are a window-space overlay after presentation.
             // They must not be rasterized into the scaled/letterboxed game.
@@ -3340,6 +3292,55 @@ public:
                         : std::array<std::uint8_t, 3>{180, 200, 215};
                     for (unsigned c = 0; c < 3; ++c)
                         rgba_[i + c] = static_cast<std::uint8_t>(rgb[c] * effects.setup_brightness / 15U);
+                }
+            }
+        }
+        // Host confirmation belongs above source setup art and screen effects.
+        if (effects.confirmation_overlay != nullptr) {
+            const auto& overlay = *effects.confirmation_overlay;
+            const auto left = (static_cast<std::int32_t>(framebuffer.width())
+                - static_cast<std::int32_t>(overlay.width())) / 2;
+            const auto top = (static_cast<std::int32_t>(framebuffer.height())
+                - static_cast<std::int32_t>(overlay.height())) / 2;
+            const auto right = left + static_cast<std::int32_t>(overlay.width());
+            const auto bottom = top + static_cast<std::int32_t>(overlay.height());
+            const auto paint = [this, &framebuffer](
+                                   std::int32_t x, std::int32_t y,
+                                   std::uint8_t value) {
+                if (x < 0 || y < 0
+                    || x >= static_cast<std::int32_t>(framebuffer.width())
+                    || y >= static_cast<std::int32_t>(framebuffer.height())) {
+                    return;
+                }
+                const auto scale = framebuffer.draw_scale();
+                const auto stored_width = static_cast<std::size_t>(
+                    framebuffer.stored_width());
+                const auto origin_x = static_cast<std::uint32_t>(x) * scale;
+                const auto origin_y = static_cast<std::uint32_t>(y) * scale;
+                for (std::uint32_t row = 0; row < scale; ++row) {
+                    for (std::uint32_t column = 0; column < scale; ++column) {
+                        const auto pixel = (static_cast<std::size_t>(
+                            origin_y + row) * stored_width
+                            + origin_x + column) * 4U;
+                        rgba_[pixel] = value;
+                        rgba_[pixel + 1U] = value;
+                        rgba_[pixel + 2U] = value;
+                        rgba_[pixel + 3U] = 255U;
+                    }
+                }
+            };
+            for (auto y = top - 4; y < bottom + 4; ++y) {
+                for (auto x = left - 6; x < right + 6; ++x) {
+                    const auto border = x == left - 6 || x == right + 5
+                        || y == top - 4 || y == bottom + 3;
+                    paint(x, y, border ? 255U : 0U);
+                }
+            }
+            for (std::uint32_t y = 0U; y < overlay.height(); ++y) {
+                for (std::uint32_t x = 0U; x < overlay.width(); ++x) {
+                    if (overlay.get(x, y) == 0U) continue;
+                    paint(left + static_cast<std::int32_t>(x),
+                        top + static_cast<std::int32_t>(y), 255U);
                 }
             }
         }
@@ -6953,6 +6954,7 @@ int main(int argc, char** argv) {
         bool exit_confirmation =
             std::getenv("STARFOX_TEST_EXIT_CONFIRMATION") != nullptr;
         bool exit_yes_selected{};
+        starfox::input::ButtonMask exit_menu_previous{};
         const auto save_hud_layout = [&] {
             static_cast<void>(starfox::app::save_hud_layout(
                 hud_layout_path, hud_layouts));
@@ -8249,6 +8251,19 @@ int main(int argc, char** argv) {
             if (state_slot_window || suppress_state_input) {
                 if (!state_slot_window && sampled_buttons == 0) suppress_state_input = false;
                 sampled_buttons = 0;
+            }
+            // Host EXIT is a visible menu action, using the existing NO/YES
+            // confirmation. Do not overload a cartridge button combination.
+            const auto exit_menu_pressed=static_cast<ButtonMask>(sampled_buttons & ~exit_menu_previous);
+            exit_menu_previous=sampled_buttons;
+            if(!exit_confirmation && game.in_setup_menu()
+                && game.pregame_page()==starfox::simulation::PregamePage::main
+                && game.pregame_selection()==42U
+                && (exit_menu_pressed & starfox::input::a)!=0) {
+                exit_confirmation=true;exit_yes_selected=false;
+                // Latch the opening A level so a held press cannot immediately
+                // choose the default NO on the next presentation frame.
+                input.reset(sampled_buttons);
             }
             input.sample(sampled_buttons);
             if (exit_confirmation) {
@@ -12232,7 +12247,7 @@ int main(int argc, char** argv) {
                             ? starfox::render::effect_group(game.pregame_selection()==12U?game.effect():game.world_effect())
                             : game.pregame_page() == starfox::simulation::PregamePage::two_d
                                 ? "2D OPTIONS" : "3D OPTIONS", 27, 10U);
-                        std::array<std::int32_t, 42> row_y;
+                        std::array<std::int32_t, 43> row_y;
                         row_y.fill(-1);
                         const auto selected_row=std::size_t(std::find(visual_order.begin(),visual_order.end(),game.pregame_selection())-visual_order.begin());
                         const auto first_visible=!main_page && visual_order.size()>14
@@ -12338,6 +12353,7 @@ int main(int argc, char** argv) {
                             game.pregame_selection() == 14U);
                         draw_graphics_row(game.runtime_options_open()?"RESUME":"START GAME", "", row_y[15],
                             game.pregame_selection() == 15U);
+                        draw_graphics_row("EXIT", "A  CONFIRM", row_y[42],game.pregame_selection()==42U);
                         draw_graphics_row("PREVIEW", on_off(game.preview_requested()), row_y[16],
                             game.pregame_selection() == 16U);
                         draw_graphics_row("3D BLOOM", starfox::render::bloom_names[game.bloom()], row_y[17],
@@ -12764,6 +12780,8 @@ int main(int argc, char** argv) {
             window.finish_temporal_frame(temporal_presented);
             framebuffer.end_write_coverage();
             if (test_frames != 0 && presented_frames + 1U == test_frames) {
+                std::cerr<<"host-exit-confirmation: visible="<<exit_confirmation
+                    <<" yes="<<exit_yes_selected<<" selection="<<unsigned(game.pregame_selection())<<'\n';
                 if(const auto* prefix=std::getenv("STARFOX_CAPTURE_ISOLATED_PREFIX")) {
                     const auto rgba=window.rgba();
                     const auto at=(std::size_t(80*render_scale)*framebuffer.stored_width()+(viewport_origin+16)*render_scale)*4;

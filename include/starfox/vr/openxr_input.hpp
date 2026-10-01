@@ -29,6 +29,8 @@ struct VrControls {
     bool select{},select_pressed{};
     bool stick_left{},stick_right{},reset_pressed{};
     std::uint32_t active_actions{};
+    // Physical menu confirmation is independent of gameplay fire on Frame.
+    bool menu_confirm{},menu_confirm_active{};
 };
 
 enum class VrControlAction : std::uint32_t {
@@ -49,6 +51,13 @@ constexpr std::uint32_t vr_control_bit(VrControlAction action) noexcept {
 }
 [[nodiscard]] VrControls select_vr_control_sources(
     const VrControls& openxr, const VrControls& desktop) noexcept;
+
+inline void desktop_face_buttons(VrControls& controls,bool steam_frame,
+    bool south,bool east,bool west,bool north) noexcept {
+    controls.fire=steam_frame?west:south;controls.bomb=east;
+    controls.boost=steam_frame?north:west;controls.brake=steam_frame?south:north;
+    controls.menu_confirm=south;controls.menu_confirm_active=true;
+}
 
 // SDL's level-state sampler also runs while the XR session is unfocused; the
 // caller discards those controls but retains these edge states for resume.
@@ -90,6 +99,7 @@ public:
     const std::string& status() const noexcept {return status_;}
 private:
     InputApi api_;
+    XrPath frame_profile_{};
     XrSession session_{};XrActionSet set_{};std::array<XrAction,18> actions_{};
     std::array<XrSpace,2> aim_spaces_{};
     std::array<XrPath,2> hands_{};

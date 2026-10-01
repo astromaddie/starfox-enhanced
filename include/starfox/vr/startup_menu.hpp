@@ -1,6 +1,7 @@
 #pragma once
 #include "starfox/vr/openxr_input.hpp"
 #include "starfox/vr/menu_stick.hpp"
+#include "starfox/vr/presentation.hpp"
 #include "starfox/localization/menu_catalog.hpp"
 #include "starfox/render/effect_types.hpp"
 #include <array>
@@ -10,8 +11,11 @@
 namespace starfox::vr {
 class StartupMenu {
 public:
-    enum class Page { main,options,cheats,three_d,two_d };
+    enum class Page { main,options,cheats,three_d,two_d,presentation,exit_confirmation };
     Page page{Page::main};
+    PresentationPreferences presentation;
+    unsigned recenter_revision{};
+    bool exit_requested{};
     bool open{true},god_mode{},extended{},alternate_available{},runtime{};
     bool infinite_bombs{},infinite_boost{},infinite_lives{},swap_face_buttons{};
     bool unlocked_pace{true};
@@ -46,19 +50,21 @@ public:
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
-    std::array<uint8_t,20> preferences() const noexcept {
-        return {'S','F','V','R',5,uint8_t(language),uint8_t(god_mode),
+    std::array<uint8_t,26> preferences() const noexcept {
+        return {'S','F','V','R',6,uint8_t(language),uint8_t(god_mode),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
             uint8_t(swap_face_buttons),uint8_t(infinite_bombs),uint8_t(unsigned(infinite_boost)|(unsigned(infinite_lives)<<1)),
-            uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity)};
+            uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
+            uint8_t(presentation.cockpit),uint8_t(presentation.world_scale),uint8_t(presentation.head_translation),
+            uint8_t(presentation.origin_x+100),uint8_t(presentation.origin_y+100),uint8_t(presentation.origin_z+100)};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
-        if((bytes.size()!=16 && bytes.size()!=20) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
-            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>5) || bytes[5]>=6 || bytes[7]>=3
+        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
+            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>6) || bytes[5]>=6 || bytes[7]>=3
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
-        if(bytes.size()!=(bytes[4]>=4?20U:16U)) return false;
+        if(bytes.size()!=(bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -71,6 +77,10 @@ public:
         if(bytes[4]>=5) {
             if((bytes[11]>>3)>=steer_sensitivities.size()) return false;
         } else if(bytes[11]>(bytes[4]==1?1:3)) return false;
+        if(bytes[4]>=6 && (bytes[20]>1 || bytes[21]>=6 || bytes[22]>=5
+            || bytes[23]>200 || bytes[24]>200 || bytes[25]>200)) return false;
+        presentation={};
+        if(bytes[4]>=6) presentation={bytes[20]!=0,bytes[22],bytes[21],int(bytes[23])-100,int(bytes[24])-100,int(bytes[25])-100};
         language=bytes[5];god_mode=bytes[6];default_laser=bytes[7];msu_music=bytes[8];
         music_volume=bytes[9];sfx_volume=bytes[10];unlocked_pace=(bytes[11]&1)!=0;
         ray_tracing=bytes[4]>=2 && (bytes[11]&2)!=0;
@@ -83,7 +93,7 @@ public:
         model_intensity=bytes[4]>=4?bytes[18]:100;world_intensity=bytes[4]>=4?bytes[19]:100;
         return true;
     }
-    unsigned row_count() const noexcept {return page==Page::main?6:page==Page::options?10:page==Page::three_d?(ray_tracing_available?5:4):page==Page::two_d?5:7;}
+    unsigned row_count() const noexcept {return page==Page::presentation?8:page==Page::exit_confirmation?2:page==Page::main?6:page==Page::options?11:page==Page::three_d?(ray_tracing_available?5:4):page==Page::two_d?5:7;}
     unsigned first_visible_row() const noexcept {return selection<6?0:selection-5;}
     VrControls gameplay_controls(VrControls controls) const noexcept {
         // Native mapping is Y=fire, X=boost, A=bomb, B=brake.
@@ -104,7 +114,7 @@ public:
         armed_=false;direction_held_=true;++revision;
     }
     void sample(const VrControls& input,bool focused) {
-        const bool confirm=input.fire || input.menu;
+        const bool confirm=(input.menu_confirm_active?input.menu_confirm:input.fire) || input.menu;
         if(!focused) {armed_=false;direction_held_=true;menu_stick_.reset();return;}
         const auto cardinal=menu_stick_.sample(input.steer.x,input.steer.y);
         const int direction=cardinal==starfox::input::up?-1:cardinal==starfox::input::down?1:0;
@@ -123,7 +133,7 @@ public:
                 else if(selection==2 && msu_available) msu_music=!msu_music;
                 else if(selection==3) {page=Page::options;selection=0;}
                 else if(selection==4) open=false;
-                else if(selection==5) preview=!preview;
+                else if(selection==5) {page=Page::exit_confirmation;selection=0;}
             } else if(page==Page::options) {
                 if(selection==0) {page=Page::cheats;selection=0;}
                 else if(selection==1) crosshair_colour=(crosshair_colour+1)%8;
@@ -134,7 +144,20 @@ public:
                 else if(selection==6) {page=Page::three_d;selection=0;}
                 else if(selection==7) {page=Page::two_d;selection=0;}
                 else if(selection==8) steer_sensitivity_index=(steer_sensitivity_index+1)%steer_sensitivities.size();
+                else if(selection==9) {page=Page::presentation;selection=0;}
                 else {page=Page::main;selection=3;}
+            } else if(page==Page::exit_confirmation) {
+                if(selection==1) exit_requested=true;
+                else {page=Page::main;selection=5;}
+            } else if(page==Page::presentation) {
+                if(selection==0) presentation.cockpit=!presentation.cockpit;
+                else if(selection==1) presentation.world_scale=(presentation.world_scale+1)%6;
+                else if(selection==2) presentation.head_translation=(presentation.head_translation+1)%5;
+                else if(selection>=3 && selection<=5) {
+                    int& value=selection==3?presentation.origin_x:selection==4?presentation.origin_y:presentation.origin_z;
+                    value=value>=100?-100:value+5;
+                } else if(selection==6) ++recenter_revision;
+                else {page=Page::options;selection=9;}
             } else if(page==Page::three_d) {
                 if(selection==0) model_effect=next_style(model_effect);
                 else if(selection==1) model_intensity=(model_intensity+25)%125;
@@ -165,8 +188,16 @@ public:
             ++revision;
         }
     }
-    std::string title() const {return page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
+    std::string title() const {return page==Page::exit_confirmation?"EXIT GAME?":page==Page::presentation?"VR PRESENTATION":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
     std::vector<std::string> labels() const {
+        if(page==Page::exit_confirmation) return {"NO / BACK","YES / EXIT"};
+        if(page==Page::presentation) return {
+            std::string("CAMERA: ")+(presentation.cockpit?"COCKPIT":"EXISTING"),
+            "WORLD SCALE: "+std::to_string(int(presentation.scale()*100))+"%",
+            "HEAD TRANSLATION: "+std::to_string(presentation.head_translation*50)+"%",
+            "COCKPIT X: "+std::to_string(presentation.origin_x)+" CM",
+            "COCKPIT Y: "+std::to_string(presentation.origin_y)+" CM",
+            "COCKPIT Z: "+std::to_string(presentation.origin_z)+" CM","RECENTER","BACK"};
         if(page==Page::three_d || page==Page::two_d) {
             const bool models=page==Page::three_d;
             std::vector<std::string> rows{
@@ -189,17 +220,17 @@ public:
             std::string("SWAP A/B + Y/X: ")+(swap_face_buttons?"ON":"OFF"),
             "MUSIC VOLUME: "+std::to_string(music_volume)+"%","SFX VOLUME: "+std::to_string(sfx_volume)+"%",
             std::string("LANGUAGE: ")+languages[language<6?language:0],"3D OPTIONS","2D OPTIONS",
-            "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%","BACK"};
+            "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%","VR PRESENTATION","BACK"};
         return {std::string("EXPERIENCE: ")+(extended?"STARFOX EX":"ORIGINAL")+(runtime?" (LOCKED)":alternate_available?"":" (ONLY)"),
             std::string("PACE/SPEED: ")+(unlocked_pace?"UNLOCKED 20 HZ":"ORIGINAL"),
             std::string("MSU-1 MUSIC: ")+(msu_available?(msu_music?"ON":"OFF"):"NOT FOUND"),
-            "OPTIONS",runtime?"RESUME":"START GAME",std::string("PREVIEW: ")+(preview?"ON":"OFF")};
+            "OPTIONS",runtime?"RESUME":"START GAME","EXIT"};
     }
     std::array<std::u32string_view,2> localized_help() const {
         constexpr std::array<std::array<std::u32string_view,2>,6> help{{
-            {U"STICK: MOVE",U"FIRE: SELECT"},{U"スティック: 移動",U"ショット: 決定"},
-            {U"STICK: BEWEGEN",U"FEUER: AUSWÄHLEN"},{U"STICK : DÉPLACER",U"TIR : VALIDER"},
-            {U"PALANCA: MOVER",U"DISPARO: ELEGIR"},{U"STICK: MOVE",U"FIRE: SELECT"}}};
+            {U"STICK: MOVE",U"MENU: SELECT"},{U"スティック: 移動",U"MENU: 決定"},
+            {U"STICK: BEWEGEN",U"MENU: AUSWÄHLEN"},{U"STICK : DÉPLACER",U"MENU : VALIDER"},
+            {U"PALANCA: MOVER",U"MENU: ELEGIR"},{U"STICK: MOVE",U"MENU: SELECT"}}};
         return help[language<6?language:0];
     }
     std::u32string translate(std::string_view key) const {

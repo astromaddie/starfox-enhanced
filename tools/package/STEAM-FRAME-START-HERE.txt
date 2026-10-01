@@ -21,6 +21,16 @@ directory. To choose another asset bundle, data directory, or optional MSU-1
 pack, pass --bundle PATH, --data-dir PATH, or --msu PATH. Run
 starfox_steamframe --help for startup options.
 
+Native Frame controls: A brake, B bomb, X shoot, Y boost; bumpers roll.
+Menu is source Start/pause; View is source Select. Cartridge control type and
+face-button swap options still apply to gameplay.
+
+Menu + View opens host runtime settings. Use the stick/D-pad to move and A or
+Menu to confirm. OPTIONS > VR PRESENTATION selects the existing camera
+(default) or pilot/cockpit view, world scale, head translation strength,
+cockpit XYZ origin calibration, and RECENTER. Head translation preserves IPD.
+Use EXIT in the host menu, then YES / EXIT to quit; NO / BACK returns.
+
 No ROM, generated BIN, private music, saves, or keys are included or should be
 redistributed with this package. Physical headset startup, tracking, controller
 input, comfort, and sustained performance still require Steam Frame testing.

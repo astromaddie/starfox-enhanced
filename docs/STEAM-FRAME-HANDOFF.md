@@ -93,7 +93,7 @@ Touch/Index-compatible bindings and do not verify the new Frame map.
 
 The current controller change enables `/interaction_profiles/valve/frame_controller_valve`
 only when `XR_VALVE_frame_controller_interaction` is advertised. It maps left
-stick/D-pad to steering, right A/B/X/Y to fire/bomb/boost/brake, bumpers to
+stick/D-pad to steering, right X/B/Y/A to fire/bomb/boost/brake, bumpers to
 left/right roll, right Menu to Start, and left View to Select; existing
 Simple, Touch, and Index bindings remain. Input arbitration selects one active
 source per action, with desktop gamepad fallback for actions the OpenXR profile
@@ -104,7 +104,14 @@ suppresses desktop controls and pauses game/audio for that frame even while the
 cached session event still says focused. The injected-runtime tests verify
 exact profile paths, fallback-profile bindings, source arbitration, button
 mapping, haptic binding availability, failure cleanup, and focus-resume edges.
-Device retest of the Frame-specific bindings remains pending.
+The wearer tested the dedicated profile on `db2b7fb` and confirmed the buttons
+worked, but its A-fire/X-boost/Y-brake map disagreed with the on-screen
+control settings. Their advertised mapping was A brake, B bomb, X shoot,
+Y boost. The correction above follows that report; its hardware retest is
+pending. The Frame SDL fallback matches it, while other profiles and PCVR
+fallback are unchanged. Physical A/Menu still confirms the host menu through
+a separate confirmation level; gameplay A is not aliased to fire. Cartridge
+C_TYPE and host face-swap behavior remain unchanged.
 
 The shared OpenXR haptic API supports the Frame and existing fallback profiles;
 it maps the authored dual-band amplitude to `max(low, high)` on the native
@@ -117,10 +124,13 @@ earlier independent Original focus run reported equal game state but a
 serialized audio-state difference beginning at byte 65,584 and PCM divergence
 at sample 67,385 at 72 Hz; output ports and logic/audio/raster counts matched.
 A later rebuilt run with full APU-write tracing passed Original parity at
-72/90/120 Hz, but the earlier discrepancy has no established cause and the
-rumble-disabled counterfactual has not run. Keep the 72 Hz focus audio
-discrepancy open; do not treat the later pass as a resolution or as evidence of
-VR rumble integration.
+72/90/120 Hz. A paired control then used the same instrumented binary with
+rumble enabled and disabled; both settings passed twice with matching 84,811
+APU writes, 40 output ports, 128,000 PCM samples, 276,286 serialized audio bytes,
+and game state. The earlier 72 Hz focus discrepancy remains unexplained and
+unreproduced under this instrumentation; there is no supported causal narrowing
+toward rumble and no restored VR rumble hook. Private paired-control evidence
+is retained outside the repository in the development data directory.
 
 The verified current host checks are `starfox_vr_input_check`,
 `starfox_vr_runtime_tests`, `starfox_rumble_sequencer_tests`, the PCVR `--help`
@@ -131,3 +141,84 @@ excluded from Git and packages. The macOS host cannot perform the Linux
 Clang/LLD cross-build; hosted Linux CI provides that evidence. One earlier
 macOS application save-failure fixture hit an Apple filesystem rename exception,
 while the corresponding Linux CI application regression passed.
+
+
+## Approved Layout A presentation milestone (pending integration)
+
+Source base is `db2b7fb5b92483766ea36b7a38abec8a831b08cf`. The shared
+presentation change is uncommitted for coordinator review. No cartridge bytes,
+generated bundle, screenshots, or private regression inputs are in this diff.
+SDL/OpenXR/Vulkan pins and the native Vulkan backend are unchanged.
+
+Preferences v6 append presentation fields to the v5 prefix. Versions 1–5
+restore the existing camera, 100% world scale, 100% head translation, and zero
+cockpit calibration. The menu exposes existing/cockpit camera, bounded world
+scale, 0/50/100/150/200% head translation, cockpit XYZ offsets in centimetres,
+and recenter. Cockpit calibration stays in physical centimetres when world
+scale changes. Translation changes the anchored head centre only, preserving
+IPD and raw compositor poses/FOV. Recenter is applied once at the next stereo
+frame boundary; a pending right eye cannot observe a different origin.
+
+Cockpit presentation uses the active authored player reference independently
+of whether the ship is visible. Regular planet/space pilot strategies move the
+view origin to that reference plus calibration; scripted strategies preserve
+the source camera. Only the obstructing player packet is hidden in pilot mode.
+No isolated COCKPIT mesh is inserted and no cartridge camera flags are written.
+The earlier rainbow mesh inventory specimen was never runtime cockpit evidence.
+Source game timing, source input/aim registers, and default camera behavior are
+retained. Exact seat fit, aiming appearance, scripted transitions, and headset
+comfort still require wearer acceptance; host matrix tests are not that proof.
+
+Startup/runtime menus, source pause, map, and briefing presentation use an
+independently owned 1024x896 mono OpenXR quad swapchain alongside the stereo
+projection. Its world-locked, level pose starts at 1.75 m and its width is
+1.15 m. Eye poses and FOV are runtime supplied. Image acquisition, wait, GPU
+fence completion, release, and layer submission have distinct ownership; a
+pending quad does not rerender the eyes or advance simulation. The shared
+Vulkan target abstraction supports a single image list for this mono pass.
+Startup source glyphs, approved panel/focus treatment, and two-row Exit
+confirmation are rendered by the shared production packet builder.
+
+Layout A retains original/EX sprite and portrait pixels with nearest sampling.
+The compact dialogue group ends before the SHIELD/instrument row; each group
+moves as a unit. The 256x224 OAM composition and inner FX meter origin (16,16)
+are retained before offsets. Original and EX live-state GPU readbacks show
+separated portrait, dialogue, SHIELD, bombs, and boost bars. Source reticle and
+warning sprites stay out of HUD relocation. In cockpit mode instruments use
+the authored ship orientation/reference. The desktop main menu also exposes
+EXIT and reuses its existing NO/YES confirmation, with the opening press
+latched so holding A cannot immediately dismiss it. Same-frame native before/after
+captures established that the flat fallback previously dimmed and overpainted
+the card with source menu rows; the existing card now composes after source
+setup/style passes. The native GPU confirmation implementation is unchanged.
+
+Verification of this source state: shared PCVR and native macOS desktop builds;
+`starfox_vr_input_check`, `starfox_vr_presentation_check`, and
+`starfox_vr_camera_check`, `starfox_vr_runtime_tests`, and
+`starfox_rumble_sequencer_tests` pass. Coverage includes v1–v5 migration, v6 calibration,
+Frame/fallback bindings and separate physical confirmation, source HUD offsets,
+non-unit head translation with preserved IPD, recenter across pending eyes,
+and projection-plus-quad ownership through wait/cancel/release. Native GPU
+readbacks use the actual shared production packet builders, mono depth target,
+draw packets, command fence, and readback on Apple M4/MoltenVK. The external
+render-only harness enables macOS Vulkan portability; it does not claim a
+successful full scene regression or a headset render. The actual desktop EXIT / NO / reopen / YES sequence also exits successfully;
+the frame-201 before/after pair verifies the readable confirmation above menu
+rows. Approved asset and implementation evidence remain private under the task visualization directory.
+
+The broader macOS exception-path checks are not reported passed: existing
+swapchain/session invalid-input tests and packet input-validation throws enter
+Apple crash handling on this host. The focused positive-path presentation
+checks and GPU readbacks are separate evidence. Linux/ARM64/Windows/Quest
+builds (the Linux workflow now explicitly includes the affected asset-free
+presentation/input/camera/swapchain/session/runtime/rumble regressions),
+actual compositor quads, pause/map/briefing presentation, cockpit seat
+fit, and revised controller mapping require the next immutable CI/device run.
+
+The current hardware baseline is still `db2b7fb`, selected 72 Hz with two
+1728x1728 eye swapchains. The runtime recommendation is 2160x2160 at 90 Hz;
+90 Hz is neither configured nor measured. The baseline native capture shows
+clear SHIELD/bombs without dialogue, while the older real dialogue capture
+established the portrait overlap addressed here. CPU log samples are not
+per-frame GPU/compositor performance evidence; no acceptance CSV/criteria
+report exists. The source presentation milestone makes no performance claim.

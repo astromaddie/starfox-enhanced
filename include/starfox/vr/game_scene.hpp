@@ -1,4 +1,5 @@
 #pragma once
+#include "starfox/vr/presentation.hpp"
 #include "starfox/render/object_snapshot.hpp"
 #include "starfox/render/software_renderer.hpp"
 #include "starfox/render/grid_line_history.hpp"
@@ -27,6 +28,9 @@ struct GameSceneSnapshot {
     bool shadows_enabled{};
     simulation::GameFlowState flow{};
     simulation::ObjectHandle player{};
+    // A live player reference is captured independently of draw visibility.
+    std::optional<render::ObjectPresentationSnapshot> pilot_reference;
+    bool pilot_tracking{};
     render::ObjectSnapshotMap transforms;
     std::vector<GameSceneObject> objects; // Native draw-list order, never sorted.
     std::array<simulation::ParticleState,simulation::kMaximumParticles> particles{};
@@ -77,6 +81,27 @@ struct GameSceneSnapshot {
     uint8_t game_frame{},model_scale{};
     std::optional<uint16_t> colour_table_override;
 };
+
+inline bool pilot_view_active(const GameSceneSnapshot& scene,const PresentationPreferences& preferences) noexcept {
+    return preferences.cockpit && scene.pilot_tracking && scene.pilot_reference
+        && (scene.flow==simulation::GameFlowState::gameplay || scene.flow==simulation::GameFlowState::training);
+}
+inline bool world_panel_scene(const GameSceneSnapshot& scene) noexcept {
+    return scene.paused || scene.briefing.active
+        || scene.flow==simulation::GameFlowState::planet_select
+        || scene.flow==simulation::GameFlowState::planet_travel
+        || scene.flow==simulation::GameFlowState::ex_pregame_menu;
+}
+inline EyeCamera source_panel_camera(const GameSceneSnapshot& scene) noexcept {
+    // Source focal length 256; 256x224 PPU canvas contains the 224x192 FX
+    // viewport at (16,16). Preserve dynamic authored vanishing points.
+    auto result=EyeCamera{identity_matrix,{}};
+    result.projection={2,0,0,0,0,-512.F/224,0,0,
+        1.F-2.F*(scene.source_vanishing_point[0]+16)/256.F,
+        1.F-2.F*(scene.source_vanishing_point[1]+16)/224.F,-1,-1,
+        0,0,-.05F,0};
+    return result;
+}
 
 inline bool replace_native_dialogue(const GameSceneSnapshot& scene) {
     return scene.dialogue.active && !scene.paused

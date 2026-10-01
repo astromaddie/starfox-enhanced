@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   linux-host-vr-regression:
-    name: Linux host PCVR and path regression
+    name: Linux host PCVR and shared presentation regression
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +24,7 @@ jobs:
             libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
             libxss-dev libxtst-dev libxkbcommon-dev libgl1-mesa-dev \
             libgles2-mesa-dev libegl1-mesa-dev libdbus-1-dev libudev-dev
-      - name: Build existing PCVR target and path regression
+      - name: Build PCVR and run asset-free shared regressions
         run: |
           cmake -S . -B "$RUNNER_TEMP/starfox-frame-host-vr" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -37,9 +37,12 @@ jobs:
             -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
           cmake --build "$RUNNER_TEMP/starfox-frame-host-vr" \
             --target starfox_pcvr starfox_desktop_paths_tests starfox_vr_application_tests \
+              starfox_vr_presentation_check starfox_vr_input_check starfox_vr_camera_check \
+              starfox_vr_swapchain_check starfox_vr_session_check starfox_vr_runtime_tests \
+              starfox_rumble_sequencer_tests \
             --parallel 2
           ctest --test-dir "$RUNNER_TEMP/starfox-frame-host-vr" --output-on-failure \
-            -R 'starfox_(pcvr_help|desktop_paths_tests|vr_application_tests|steam_frame_cmake_guards)'
+            -R '^starfox_(pcvr_help|desktop_paths_tests|vr_application_tests|vr_presentation_check|vr_input_check|vr_camera_check|vr_swapchain_check|vr_session_check|vr_runtime_tests|rumble_sequencer_tests|steam_frame_cmake_guards)$'
           "$RUNNER_TEMP/starfox-frame-host-vr/starfox_pcvr" --help
 
   steam-frame-arm64:

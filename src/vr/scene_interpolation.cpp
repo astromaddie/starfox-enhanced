@@ -6,6 +6,59 @@ namespace starfox::vr {
 simulation::MatrixQ15 landscape_scene_view(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha) {
     return simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
 }
+Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
+    double alpha,const PresentationPreferences& preferences) {
+    auto out=identity_matrix;
+    if(!pilot_view_active(current,preferences)) return out;
+    const auto& now=*current.pilot_reference;
+    const auto* old=previous.pilot_reference?&*previous.pilot_reference:nullptr;
+    if(!std::isfinite(alpha) || !old || !previous.pilot_tracking || previous.player!=current.player
+        || previous.flow!=current.flow || old->generation!=now.generation
+        || old->strategy_address!=now.strategy_address
+        || timing::camera_transform_is_discontinuous(previous.camera,current.camera)) alpha=1;
+    alpha=std::clamp(alpha,0.,1.);
+    const auto rotation=simulation::interpolate_rotation_matrix_q15(old?old->rotation_matrix:now.rotation_matrix,now.rotation_matrix,alpha);
+    const auto view=simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
+    const auto authored=simulation::multiply_presentation_matrix_q15(rotation,view);
+    // D * authored * D converts the ship-local +Y-down/+Z-forward basis to XR.
+    for(unsigned c=0;c<3;++c) for(unsigned r=0;r<3;++r)
+        out[c*4+r]=float(authored[c*3+r])/32768.F*((c==0)==(r==0)?1.F:-1.F);
+    const float origin[]{preferences.origin_x*.01F,preferences.origin_y*.01F,preferences.origin_z*.01F};
+    for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) out[12+r]-=out[c*4+r]*origin[c];
+    return out;
+}
+Matrix4 presentation_scene_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
+    double alpha,const PresentationPreferences& preferences) {
+    auto out=identity_matrix;
+    const float scale=preferences.scale();out[0]=out[5]=out[10]=scale;
+    if(!pilot_view_active(current,preferences)) return out;
+    const auto& now=*current.pilot_reference;
+    const auto* old=previous.pilot_reference?&*previous.pilot_reference:nullptr;
+    if(!std::isfinite(alpha) || !old || !previous.pilot_tracking || previous.flow!=current.flow
+        || previous.player!=current.player || old->generation!=now.generation
+        || old->strategy_address!=now.strategy_address
+        || timing::camera_transform_is_discontinuous(previous.camera,current.camera)) alpha=1;
+    alpha=std::clamp(alpha,0.,1.);
+    const auto player=timing::interpolate(old?old->transform:now.transform,now.transform,alpha);
+    const auto camera=timing::interpolate(previous.camera,current.camera,alpha);
+    const auto view=simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
+    const auto rotation=simulation::interpolate_rotation_matrix_q15(old?old->rotation_matrix:now.rotation_matrix,now.rotation_matrix,alpha);
+    // Calibration is in physical centimetres even when source world scale changes.
+    const double local[]{preferences.origin_x*2.56/scale,-preferences.origin_y*2.56/scale,-preferences.origin_z*2.56/scale};
+    double point[]{player.x,player.y,player.z};
+    for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) point[r]+=local[c]*rotation[c*3+r]/32768.;
+    const double origin[]{camera.x,camera.y,camera.z};
+    double delta[3]{};
+    for(unsigned i=0;i<3;++i) {
+        delta[i]=std::fmod(point[i]-origin[i],65536.);
+        if(delta[i]>32767.) delta[i]-=65536.;else if(delta[i]<-32768.) delta[i]+=65536.;
+    }
+    for(unsigned r=0;r<3;++r) {
+        double component{};for(unsigned c=0;c<3;++c) component+=delta[c]*view[c*3+r]/32768.;
+        out[12+r]=float(component/256.)*(r==0?-scale:scale);
+    }
+    return out;
+}
 Matrix4 landscape_camera_motion(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha) {
     if(!std::isfinite(alpha)) throw std::invalid_argument("Invalid landscape camera fraction");
     alpha=std::clamp(alpha,0.,1.);

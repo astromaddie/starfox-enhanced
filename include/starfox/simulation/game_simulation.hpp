@@ -90,8 +90,8 @@ enum class PregamePage {
     cheats,
 };
 
-inline constexpr std::array<std::uint8_t, 12> main_menu_order{
-    0,1,2,3,4,5,6,20,21,14,15,16};
+inline constexpr std::array<std::uint8_t, 13> main_menu_order{
+    0,1,2,3,4,5,6,20,21,14,15,16,42};
 inline constexpr std::array<std::uint8_t, 11> two_d_menu_order{8,18,36,37,38,39,40,41,13,24,23};
 inline constexpr std::array<std::uint8_t, 17> three_d_menu_order{7,11,9,30,17,19,10,28,29,32,27,12,22,35,33,34,23};
 inline constexpr std::array<std::uint8_t, 18> neural_three_d_menu_order{7,11,9,30,31,17,19,10,28,29,32,27,12,22,35,33,34,23};
