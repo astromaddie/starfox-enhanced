@@ -3,10 +3,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/VRShaderChecks.cmake")
 if(WINDOWS_STORE OR SWITCH OR VITA OR IOS)
     message(FATAL_ERROR "The OpenXR build currently targets desktop Windows/Linux and Android, not this platform.")
 endif()
-# The normal runtime configures the pinned SDL dependency later in CMakeLists.
-# Standalone VR builds need an installed SDL package for PCM device output.
-if(NOT STARFOX_BUILD_RUNTIME)
-    find_package(SDL3 3.2 REQUIRED CONFIG)
+# Android runtime configuration resolves its official AAR/Prefab package in
+# CMakeLists.txt. Standalone desktop VR has already fetched pinned SDL source.
+if(NOT STARFOX_BUILD_RUNTIME AND NOT TARGET SDL3::SDL3)
+    if(ANDROID)
+        find_package(SDL3 REQUIRED CONFIG)
+    else()
+        find_package(SDL3 3.2 REQUIRED CONFIG)
+    endif()
 endif()
 set(BUILD_LOADER ON CACHE BOOL "Build the OpenXR loader" FORCE)
 set(BUILD_API_LAYERS OFF CACHE BOOL "Do not build OpenXR SDK API layers" FORCE)
@@ -97,7 +101,8 @@ if(NOT ANDROID)
             set_tests_properties(starfox_vr_backdrop_check PROPERTIES LABELS vr TIMEOUT 60)
         endif()
     endif()
-    add_executable(starfox_pcvr src/vr/desktop_main.cpp)
+    add_executable(starfox_pcvr src/vr/desktop_main.cpp src/vr/desktop_paths.cpp)
+    target_include_directories(starfox_pcvr PRIVATE src/vr)
     target_link_libraries(starfox_pcvr PRIVATE starfox_vr_game SDL3::SDL3)
     if(MINGW)
         target_link_options(starfox_pcvr PRIVATE -static -static-libgcc -static-libstdc++)
@@ -116,6 +121,27 @@ if(NOT ANDROID)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
         DESTINATION licenses/fonts COMPONENT pcvr)
+    if(STARFOX_BUILD_STEAM_FRAME)
+        add_executable(starfox_steamframe
+            src/vr/desktop_main.cpp src/vr/desktop_paths.cpp)
+        target_include_directories(starfox_steamframe PRIVATE src/vr)
+        target_compile_definitions(starfox_steamframe PRIVATE STARFOX_STEAM_FRAME=1)
+        target_link_libraries(starfox_steamframe PRIVATE starfox_vr_game SDL3::SDL3)
+        install(TARGETS starfox_steamframe RUNTIME DESTINATION . COMPONENT steamframe)
+        install(PROGRAMS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/package/LAUNCH-STEAM-FRAME.sh"
+            DESTINATION . COMPONENT steamframe)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/package/STEAM-FRAME-START-HERE.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/CREDITS.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-XBRZ.txt"
+            DESTINATION . COMPONENT steamframe)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
+            DESTINATION licenses/fonts COMPONENT steamframe)
+    endif()
     add_executable(starfox_vr_cache_check tests/vulkan_pipeline_cache_tests.cpp)
     target_link_libraries(starfox_vr_cache_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_application_tests tests/vr_application_tests.cpp)

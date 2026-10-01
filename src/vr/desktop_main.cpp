@@ -1,16 +1,33 @@
 #include "starfox/vr/application.hpp"
 #include "starfox/audio/msu1_pack.hpp"
+#include "desktop_paths.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <csignal>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
 volatile std::sig_atomic_t interrupted=0;
 void interrupt(int) {interrupted=1;}
+
+std::filesystem::path executable_directory(const char* argv0) {
+    const char* base_path = SDL_GetBasePath();
+    if (base_path && *base_path) {
+        return std::filesystem::absolute(base_path);
+    }
+    if (!argv0 || !*argv0) {
+        throw std::runtime_error("Cannot determine the executable directory");
+    }
+    return std::filesystem::absolute(argv0).parent_path();
+}
+
 class DesktopGamepad {
 public:
     DesktopGamepad() {
@@ -75,33 +92,58 @@ private:
 }
 
 int main(int argc,char** argv) try {
-    const auto directory=std::filesystem::absolute(argv[0]).parent_path();
-    auto bundle=directory/"Starfox-Assets.BIN";
-    auto data=directory/"vr-data";
+    const auto directory=executable_directory(argc>0?argv[0]:nullptr);
+    starfox::vr::DesktopPathOverrides path_overrides;
     std::string msu;
     bool enhanced_sky=false;
     for(int i=1;i<argc;++i) {
         const std::string_view option=argv[i];
         if(option=="--help" || option=="-h") {
+#if defined(STARFOX_STEAM_FRAME)
+            std::cout<<"Star Fox Enhanced Steam Frame (development)\n"
+                "Usage: starfox_steamframe [--bundle Starfox-Assets.BIN] [--data-dir DIRECTORY] [--msu PACK] [--enhanced-sky]\n"
+                "--enhanced-sky: start with Enhanced Sky on (also in 2D Options); unsupported families remain native.\n"
+                "Requires a Vulkan-capable GPU and an active OpenXR headset runtime.\n"
+                "Default bundle and saves/settings/shader cache: $XDG_DATA_HOME/StarFoxEnhanced\n"
+                "If XDG_DATA_HOME is unset or relative, HOME/.local/share/StarFoxEnhanced is used.\n"
+                "Generate your own BIN with starfox_asset_builder; no cartridge is bundled.\n";
+#else
             std::cout<<"Star Fox Enhanced PCVR (development)\n"
                 "Usage: starfox_pcvr [--bundle Starfox-Assets.BIN] [--data-dir DIRECTORY] [--msu PACK] [--enhanced-sky]\n"
                 "--enhanced-sky: start with Enhanced Sky on (also in 2D Options); unsupported families remain native.\n"
                 "Requires a Vulkan-capable GPU and an active OpenXR headset runtime.\n"
                 "Default bundle: beside this executable. Saves/settings: vr-data beside this executable.\n"
                 "Generate your own BIN with starfox_asset_builder; no cartridge is bundled.\n";
+#endif
             return 0;
         }
         if(option=="--enhanced-sky") {enhanced_sky=true;continue;}
         if(i+1>=argc || (option!="--bundle" && option!="--data-dir" && option!="--msu")) {
             std::cerr<<"Unknown or incomplete option: "<<option<<". Use --help.\n";return 2;
         }
-        if(option=="--bundle") bundle=std::filesystem::absolute(argv[++i]);
-        else if(option=="--data-dir") data=std::filesystem::absolute(argv[++i]);
+        if(option=="--bundle") path_overrides.bundle=argv[++i];
+        else if(option=="--data-dir") path_overrides.data_directory=argv[++i];
         else msu=argv[++i];
     }
+#if defined(STARFOX_STEAM_FRAME)
+    constexpr bool steam_frame=true;
+#else
+    constexpr bool steam_frame=false;
+#endif
+    const auto paths=starfox::vr::resolve_desktop_paths(
+        directory,steam_frame,
+        std::getenv("XDG_DATA_HOME")?std::getenv("XDG_DATA_HOME"):"",
+        std::getenv("HOME")?std::getenv("HOME"):"",
+        path_overrides);
+    const auto& bundle=paths.bundle;
+    const auto& data=paths.data_directory;
     if(!std::filesystem::is_regular_file(bundle)) {
         std::cerr<<"Missing asset bundle: "<<bundle<<"\n"
+#if defined(STARFOX_STEAM_FRAME)
+            "Use starfox_asset_builder to prepare your own Starfox-Assets.BIN in the default data directory or pass --bundle PATH.\n";
+#else
             "Use starfox_asset_builder to prepare your own Starfox-Assets.BIN, then place it beside this executable or pass --bundle PATH.\n";
+#endif
         return 2;
     }
     if(msu.empty()) {
