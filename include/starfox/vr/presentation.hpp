@@ -9,6 +9,7 @@ struct PresentationPreferences {
     unsigned head_translation{2}; // 0, 0.5, default 1, 1.5, 2 times head-centre displacement.
     unsigned world_scale{}; // Default1:1; metres per source scene metre.
     int origin_x{},origin_y{},origin_z{}; // centimetres relative to authored player reference
+    bool follow_ship_rotation{}; // Opt-in pilot camera; physical head tracking stays independent.
     static constexpr float scales[]{1.F,.5F,.75F,1.25F,1.5F,2.F};
     float scale() const noexcept {return scales[world_scale<6?world_scale:0];}
     float translation_scale() const noexcept {return float(head_translation<5?head_translation:2)*.5F;}

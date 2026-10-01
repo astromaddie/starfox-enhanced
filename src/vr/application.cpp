@@ -777,7 +777,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         :host.cartridge_save_path.parent_path()/"vr-preferences.bin";
     if(startup.open && !preferences_path.empty()) try {
         if(std::filesystem::exists(preferences_path)) {
-            if((std::filesystem::file_size(preferences_path)!=16 && std::filesystem::file_size(preferences_path)!=20 && std::filesystem::file_size(preferences_path)!=26)
+            const auto size=std::filesystem::file_size(preferences_path);
+            if((size!=16 && size!=20 && size!=26 && size!=27)
                 || !startup.restore_preferences(starfox::state::read_file(preferences_path)))
                 std::cerr<<"Invalid VR preferences; using defaults\n";
         }

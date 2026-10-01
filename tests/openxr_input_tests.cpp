@@ -288,17 +288,33 @@ int main() try {
         require(!migrated.presentation.cockpit && migrated.presentation.translation_scale()==1.F && migrated.presentation.scale()==1.F);
         for(unsigned version=1;version<=5;++version) {
             auto old=preferences;old[4]=uint8_t(version);old[11]&=version==1?1:version<5?3:255;old[15]&=version<3?1:3;
-            migrated.presentation={true,false,5,50,-50,100};
+            migrated.presentation={true,false,5,50,-50,100,true};
             require(migrated.restore_preferences(std::span(old).first(version<4?16:20)));
             require(!migrated.presentation.cockpit && migrated.presentation.translation_scale()==1.F && migrated.presentation.scale()==1.F
-                && migrated.presentation.origin_x==0 && migrated.presentation.origin_y==0 && migrated.presentation.origin_z==0);
+                && migrated.presentation.origin_x==0 && migrated.presentation.origin_y==0 && migrated.presentation.origin_z==0
+                && !migrated.presentation.follow_ship_rotation);
         }
         StartupMenu presentation_menu;presentation_menu.page=Page::presentation;
         presentation_menu.sample({},true);presentation_menu.sample(press,true);
-        require(presentation_menu.presentation.cockpit);
-        presentation_menu.selection=6;presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.presentation.cockpit && !presentation_menu.presentation.follow_ship_rotation);
+        require(presentation_menu.row_count()==9 && presentation_menu.labels()[1]=="FOLLOW SHIP ROTATION: OFF");
+        presentation_menu.selection=1;presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.presentation.follow_ship_rotation && presentation_menu.labels()[1]=="FOLLOW SHIP ROTATION: ON");
+        require(migrated.restore_preferences(presentation_menu.preferences()) && migrated.presentation.follow_ship_rotation);
+        auto version6=presentation_menu.preferences();version6[4]=6;
+        require(migrated.restore_preferences(std::span(version6).first(26)) && migrated.presentation.cockpit
+            && !migrated.presentation.follow_ship_rotation);
+        require(!migrated.restore_preferences(version6)); // Version and size must agree.
+        require(presentation_menu.preferences()[4]==7 && presentation_menu.preferences().size()==27);
+        presentation_menu.selection=7;presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.recenter_revision==1);
         presentation_menu.presentation={true,false,5,-100,100,35};
+        auto calibrated_v6=presentation_menu.preferences();calibrated_v6[4]=6;
+        migrated.presentation.follow_ship_rotation=true;
+        require(migrated.restore_preferences(std::span(calibrated_v6).first(26))
+            && migrated.presentation.origin_x==-100 && migrated.presentation.origin_y==100
+            && migrated.presentation.origin_z==35 && migrated.presentation.scale()==2.F
+            && migrated.presentation.translation_scale()==0.F && !migrated.presentation.follow_ship_rotation);
         require(migrated.restore_preferences(presentation_menu.preferences()) && migrated.presentation.origin_z==35
             && migrated.presentation.origin_x==-100 && migrated.presentation.translation_scale()==0.F && migrated.presentation.scale()==2.F);
         presentation_menu.presentation.head_translation=3;

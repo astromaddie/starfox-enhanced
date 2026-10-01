@@ -467,3 +467,58 @@ The previously hanging macOS Vulkan/MoltenVK/query/negative-exception probes
 were not retried. Native rendered depth/readback, still-head/pause behavior,
 and wearer acceptance of this tower correction remain pending. No performance
 improvement or frame-time acceptance is claimed.
+
+## Optional ship rotation in Cockpit mode (after b3e4de8)
+
+The wearer confirmed the tower logo is stable on native Frame build `b3e4de8`
+and reported intentionally exiting to Steam. That is hardware acceptance of
+the tower correction; the exit is not a crash report. The existing cockpit
+view hides the player's ship and has no modeled 3D cockpit interior. An
+interior remains separate work requiring the mockup/assets approval process.
+
+VR Presentation now includes `FOLLOW SHIP ROTATION: OFF/ON`, using the existing
+scrolling rows. It defaults OFF, persists in v7 preferences (27 bytes), and
+only affects an active Cockpit pilot view. All v1–v6 preference formats still
+load; the new value defaults OFF when migrating, including calibrated v6
+settings. Both the preference parser and application file-size guard accept
+v7. Turning Cockpit off retains the stored rotation choice without applying it.
+
+ON rotates the presented world into the authored ship frame after translation
+to the calibrated pilot position. The inverse uses the actual composed Q15
+ship/source-view basis, accounting for its small quantization errors. Physical
+head orientation, translation and stereo eye separation are composed afterward;
+raw OpenXR compositor eye poses are untouched. The matching inverse cancels
+ship rotation in the existing HUD/instrument transform, so those instruments
+remain stable in the ship frame and still respond to head movement. Physical
+centimetre calibration remains independent of world scale. OFF retains the
+prior camera and rotating-instrument behavior. Scripted/nonpilot flows retain
+the existing camera; missing/replaced pilots and camera discontinuities use the
+current endpoint rather than blending across unrelated states.
+
+The live application already supplies the common presentation camera to stars,
+background/terrain, tunnel surround, model/projectile packets, sprites, bomb
+geometry and ray-view construction. This correction uses that shared path;
+no gameplay, source aiming coordinates, source clocks, audio, inputs, artwork,
+backend or dependency pins changed.
+
+Validation: the PCVR player builds, and presentation/input/camera CTest checks
+pass (3/3). Regressions cover pitch/yaw/bank direction, actual object
+interpolation plus model-matrix composition with a rotated source camera,
+calibrated pivot at 1x/2x world scale, independent physical head yaw/translation
+and IPD, interpolation/reset gates, inactive/script/training flows, toggle
+interaction, v1–v6 migration and v7 validation. Existing mocked compositor
+pose/FOV checks remain intact. Hosted CI and wearer verification of this new
+option remain pending; no comfort or performance acceptance is claimed.
+
+Private evidence: `frame-ui/cockpit-rotation` in the October 1 visualization
+workspace contains `capture.cpp`, `verification.txt`, `menu-off.png`,
+`menu-on.png`, `menu-bottom.png`, `projection.json`, and
+`controlled-bank-comparison.png`. Menu images rasterize the actual production
+menu packets and cartridge glyph masks on the CPU; the row fits and scrolling
+retains recenter/back. The bank comparison uses actual Original tick-420 world
+and HUD packets with a controlled additional 30-degree pilot bank and the
+production presentation/eye/model matrices. OFF has a level world and banked
+HUD; ON has the inversely banked world and level HUD. It is a CPU wireframe
+projection (22 world packets, 2 HUD packets, no pending model issues), not a
+native shader, full background, compositor or headset capture. No known hanging
+macOS Vulkan probes were retried, and no private art or captures are packaged.

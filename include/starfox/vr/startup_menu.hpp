@@ -50,21 +50,21 @@ public:
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
-    std::array<uint8_t,26> preferences() const noexcept {
-        return {'S','F','V','R',6,uint8_t(language),uint8_t(god_mode),
+    std::array<uint8_t,27> preferences() const noexcept {
+        return {'S','F','V','R',7,uint8_t(language),uint8_t(god_mode),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
             uint8_t(swap_face_buttons),uint8_t(infinite_bombs),uint8_t(unsigned(infinite_boost)|(unsigned(infinite_lives)<<1)),
             uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
             uint8_t(presentation.cockpit),uint8_t(presentation.world_scale),uint8_t(presentation.head_translation),
-            uint8_t(presentation.origin_x+100),uint8_t(presentation.origin_y+100),uint8_t(presentation.origin_z+100)};
+            uint8_t(presentation.origin_x+100),uint8_t(presentation.origin_y+100),uint8_t(presentation.origin_z+100),uint8_t(presentation.follow_ship_rotation)};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
-        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
-            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>6) || bytes[5]>=6 || bytes[7]>=3
+        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26 && bytes.size()!=27) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
+            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>7) || bytes[5]>=6 || bytes[7]>=3
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
-        if(bytes.size()!=(bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
+        if(bytes.size()!=(bytes[4]>=7?27U:bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -79,8 +79,10 @@ public:
         } else if(bytes[11]>(bytes[4]==1?1:3)) return false;
         if(bytes[4]>=6 && (bytes[20]>1 || bytes[21]>=6 || bytes[22]>=5
             || bytes[23]>200 || bytes[24]>200 || bytes[25]>200)) return false;
+        if(bytes[4]>=7 && bytes[26]>1) return false;
         presentation={};
         if(bytes[4]>=6) presentation={bytes[20]!=0,bytes[22],bytes[21],int(bytes[23])-100,int(bytes[24])-100,int(bytes[25])-100};
+        if(bytes[4]>=7) presentation.follow_ship_rotation=bytes[26]!=0;
         language=bytes[5];god_mode=bytes[6];default_laser=bytes[7];msu_music=bytes[8];
         music_volume=bytes[9];sfx_volume=bytes[10];unlocked_pace=(bytes[11]&1)!=0;
         ray_tracing=bytes[4]>=2 && (bytes[11]&2)!=0;
@@ -93,7 +95,7 @@ public:
         model_intensity=bytes[4]>=4?bytes[18]:100;world_intensity=bytes[4]>=4?bytes[19]:100;
         return true;
     }
-    unsigned row_count() const noexcept {return page==Page::presentation?8:page==Page::exit_confirmation?2:page==Page::main?6:page==Page::options?11:page==Page::three_d?(ray_tracing_available?5:4):page==Page::two_d?5:7;}
+    unsigned row_count() const noexcept {return page==Page::presentation?9:page==Page::exit_confirmation?2:page==Page::main?6:page==Page::options?11:page==Page::three_d?(ray_tracing_available?5:4):page==Page::two_d?5:7;}
     unsigned first_visible_row() const noexcept {return selection<6?0:selection-5;}
     VrControls gameplay_controls(VrControls controls) const noexcept {
         // Native mapping is Y=fire, X=boost, A=bomb, B=brake.
@@ -151,12 +153,13 @@ public:
                 else {page=Page::main;selection=5;}
             } else if(page==Page::presentation) {
                 if(selection==0) presentation.cockpit=!presentation.cockpit;
-                else if(selection==1) presentation.world_scale=(presentation.world_scale+1)%6;
-                else if(selection==2) presentation.head_translation=(presentation.head_translation+1)%5;
-                else if(selection>=3 && selection<=5) {
-                    int& value=selection==3?presentation.origin_x:selection==4?presentation.origin_y:presentation.origin_z;
+                else if(selection==1) presentation.follow_ship_rotation=!presentation.follow_ship_rotation;
+                else if(selection==2) presentation.world_scale=(presentation.world_scale+1)%6;
+                else if(selection==3) presentation.head_translation=(presentation.head_translation+1)%5;
+                else if(selection>=4 && selection<=6) {
+                    int& value=selection==4?presentation.origin_x:selection==5?presentation.origin_y:presentation.origin_z;
                     value=value>=100?-100:value+5;
-                } else if(selection==6) ++recenter_revision;
+                } else if(selection==7) ++recenter_revision;
                 else {page=Page::options;selection=9;}
             } else if(page==Page::three_d) {
                 if(selection==0) model_effect=next_style(model_effect);
@@ -193,6 +196,7 @@ public:
         if(page==Page::exit_confirmation) return {"NO / BACK","YES / EXIT"};
         if(page==Page::presentation) return {
             std::string("CAMERA: ")+(presentation.cockpit?"COCKPIT":"EXISTING"),
+            std::string("FOLLOW SHIP ROTATION: ")+(presentation.follow_ship_rotation?"ON":"OFF"),
             "WORLD SCALE: "+std::to_string(int(presentation.scale()*100))+"%",
             "HEAD TRANSLATION: "+std::to_string(presentation.head_translation*50)+"%",
             "COCKPIT X: "+std::to_string(presentation.origin_x)+" CM",

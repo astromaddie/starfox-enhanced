@@ -9,11 +9,20 @@
 #include <cstring>
 #include <deque>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 using namespace starfox::vr;
 namespace {
 void require(bool v,const char* message) {if(!v) throw std::runtime_error(message);}
+void close_matrix(const Matrix4& a,const Matrix4& b,float tolerance=1e-4F) {
+    for(unsigned i=0;i<16;++i) require(std::abs(a[i]-b[i])<tolerance,"Presentation matrix mismatch");
+}
+std::array<float,4> point(const Matrix4& m,std::array<float,4> p) {
+    std::array<float,4> out{};
+    for(unsigned r=0;r<4;++r) for(unsigned c=0;c<4;++c) out[r]+=m[c*4+r]*p[c];
+    return out;
+}
 template<typename T> T handle(uintptr_t n) {return reinterpret_cast<T>(n);}
 struct Fake {
     std::deque<XrSessionState> events;
@@ -109,6 +118,98 @@ XrResult XRAPI_PTR release(XrSwapchain,const XrSwapchainImageReleaseInfo*) {
 }
 }
 int main() try {
+    {
+        using namespace starfox;
+        const simulation::MatrixQ15 identity{32767,0,0,0,32767,0,0,0,32767};
+        // Independent source-space 30-degree pitch, yaw, and bank fixtures.
+        const std::array<simulation::MatrixQ15,3> rotations{{
+            {32767,0,0,0,28378,16384,0,-16384,28378},
+            {28378,0,-16384,0,32767,0,16384,0,28378},
+            {28378,16384,0,-16384,28378,0,0,0,32767}}};
+        GameSceneSnapshot now;now.flow=simulation::GameFlowState::gameplay;
+        now.pilot_tracking=true;now.player=7;now.view_matrix=identity;
+        render::ObjectPresentationSnapshot pilot;pilot.generation=2;pilot.strategy_address=1;
+        PresentationPreferences off;off.cockpit=true;
+        auto on=off;on.follow_ship_rotation=true;
+        for(unsigned axis=0;axis<3;++axis) {
+            pilot.rotation_matrix=rotations[axis];now.pilot_reference=pilot;
+            close_matrix(presentation_scene_matrix(now,now,.5,off),identity_matrix);
+            const auto following=presentation_scene_matrix(now,now,.5,on);
+            const auto moved=point(following,axis==2?std::array<float,4>{1,0,-4,1}:std::array<float,4>{0,0,-4,1});
+            require(std::abs(moved[axis==0?1:axis==1?0:1]-(axis==2?.5F:-2.F))<.001F,
+                "Ship pitch/yaw/bank turned world in wrong direction");
+            close_matrix(presentation_instrument_matrix(now,now,.5,on),identity_matrix);
+            require(presentation_instrument_matrix(now,now,.5,off)!=identity_matrix,"Legacy rotating HUD changed");
+        }
+        // Exercise the real object interpolation + model matrix, including a
+        // rotated source camera, instead of only cancelling hand-built matrices.
+        now.view_matrix=rotations[1];pilot.rotation_matrix=rotations[2];
+        pilot.transform={256,128,1024,0,0,0};now.pilot_reference=pilot;
+        now.objects.emplace_back();now.objects[0].handle=7;now.objects[0].presentation=pilot;
+        const auto poses=interpolate_scene_poses(now,now,.5,{});
+        const auto model=*game_model_matrix(poses[0],256);
+        for(unsigned world_scale:{0U,5U}) {
+            on.world_scale=world_scale;
+            const auto uncalibrated=presentation_scene_matrix(now,now,.5,on);
+            auto local=multiply_matrix(uncalibrated,model);
+            auto expected=identity_matrix;
+            expected[0]=on.scale()/256;expected[5]=expected[10]=-on.scale()/256;
+            close_matrix(local,expected,.001F);
+            on.origin_x=25;on.origin_y=-15;on.origin_z=35;
+            const auto scene=presentation_scene_matrix(now,now,.5,on);
+            const auto instruments=presentation_instrument_matrix(now,now,.5,on);
+            auto stable=identity_matrix;stable[12]=-.25F;stable[13]=.15F;stable[14]=-.35F;
+            close_matrix(instruments,stable);
+            // Calibration uses physical metres in the rotating ship frame.
+            for(unsigned i=0;i<3;++i)
+                require(std::abs(scene[12+i]-uncalibrated[12+i]-stable[12+i])<.001F,"Rotating pivot calibration scaled or changed axis");
+            const auto pivot=point(model,{.25F*256/on.scale(),.15F*256/on.scale(),-.35F*256/on.scale(),1});
+            const auto centered=point(scene,pivot);
+            for(unsigned i=0;i<3;++i) require(std::abs(centered[i])<.001F,"Calibrated pilot pivot moved under rotation");
+            // Application composes tracking on the left for every world pass.
+            // Verify independent physical translation, head yaw, and stereo IPD.
+            for(unsigned eye=0;eye<2;++eye) {
+                XrView view{XR_TYPE_VIEW};view.pose.orientation={0,.258819F,0,.965926F};
+                view.pose.position={.2F+(eye?.032F:-.032F),.1F,.05F};view.fov={-.7F,.7F,.7F,-.7F};
+                const auto raw=view;
+                const auto tracking=*eye_camera(view,1,.05F);
+                const auto composed=multiply_matrix(tracking.view,scene);
+                const auto expected_head=point(tracking.view,{0,0,0,1});
+                const auto actual_head=point(composed,pivot);
+                for(unsigned i=0;i<3;++i) require(std::abs(actual_head[i]-expected_head[i])<.001F,"Ship rotation altered local head pose/IPD");
+                require(std::memcmp(&view,&raw,sizeof(view))==0,"Runtime eye pose was mutated");
+            }
+            on.origin_x=on.origin_y=on.origin_z=0;
+        }
+        on.world_scale=0;
+        auto before=now;before.pilot_reference->rotation_matrix=identity;
+        const auto endpoint=presentation_scene_matrix(now,now,1,on);
+        require(presentation_scene_matrix(before,now,.25,on)!=endpoint,"Pilot rotation did not interpolate");
+        for(unsigned reset=0;reset<7;++reset) {
+            auto discontinuous=before;
+            if(reset==0) discontinuous.pilot_reference.reset();
+            if(reset==1) discontinuous.pilot_tracking=false;
+            if(reset==2) discontinuous.player=8;
+            if(reset==3) discontinuous.pilot_reference->generation++;
+            if(reset==4) discontinuous.pilot_reference->strategy_address++;
+            if(reset==5) discontinuous.flow=simulation::GameFlowState::title;
+            if(reset==6) discontinuous.camera.x=20000;
+            close_matrix(presentation_scene_matrix(discontinuous,now,.25,on),endpoint);
+            close_matrix(presentation_instrument_matrix(discontinuous,now,.25,on),identity_matrix);
+        }
+        close_matrix(presentation_scene_matrix(before,now,std::numeric_limits<double>::quiet_NaN(),on),endpoint);
+        for(unsigned inactive=0;inactive<4;++inactive) {
+            auto scene=now;auto preferences=on;
+            if(inactive==0) preferences.cockpit=false;
+            if(inactive==1) scene.pilot_tracking=false;
+            if(inactive==2) scene.pilot_reference.reset();
+            if(inactive==3) scene.flow=simulation::GameFlowState::title;
+            close_matrix(presentation_scene_matrix(scene,scene,.5,preferences),identity_matrix);
+            close_matrix(presentation_instrument_matrix(scene,scene,.5,preferences),identity_matrix);
+        }
+        now.flow=simulation::GameFlowState::training;
+        close_matrix(presentation_scene_matrix(now,now,.5,on),endpoint);
+    }
     {
         using namespace starfox;
         GameSceneSnapshot before,now;before.flow=now.flow=simulation::GameFlowState::gameplay;
