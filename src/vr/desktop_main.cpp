@@ -12,6 +12,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <charconv>
+#include <optional>
 
 namespace {
 using starfox::vr::VrControlAction;
@@ -127,21 +129,27 @@ int main(int argc,char** argv) try {
     starfox::vr::DesktopPathOverrides path_overrides;
     std::string msu;
     bool enhanced_sky=false;
+    std::optional<std::filesystem::path> profile_csv;
+    std::optional<unsigned> profile_frames;
     for(int i=1;i<argc;++i) {
         const std::string_view option=argv[i];
         if(option=="--help" || option=="-h") {
 #if defined(STARFOX_STEAM_FRAME)
             std::cout<<"Star Fox Enhanced Steam Frame (development)\n"
-                "Usage: starfox_steamframe [--bundle Starfox-Assets.BIN] [--data-dir DIRECTORY] [--msu PACK] [--enhanced-sky]\n"
+                "Usage: starfox_steamframe [--bundle Starfox-Assets.BIN] [--data-dir DIRECTORY] [--msu PACK] [--enhanced-sky] [--profile-csv FILE [--profile-frames N]]\n"
                 "--enhanced-sky: start with Enhanced Sky on (also in 2D Options); unsupported families remain native.\n"
+                "--profile-csv FILE: write per-frame CPU and available Vulkan GPU timestamps to FILE.\n"
+                "--profile-frames N: stop after N submitted frames in profiling mode (default 120; range 1..1000000).\n"
                 "Requires a Vulkan-capable GPU and an active OpenXR headset runtime.\n"
                 "Default bundle and saves/settings/shader cache: $XDG_DATA_HOME/StarFoxEnhanced\n"
                 "If XDG_DATA_HOME is unset or relative, HOME/.local/share/StarFoxEnhanced is used.\n"
                 "Generate your own BIN with starfox_asset_builder; no cartridge is bundled.\n";
 #else
             std::cout<<"Star Fox Enhanced PCVR (development)\n"
-                "Usage: starfox_pcvr [--bundle Starfox-Assets.BIN] [--data-dir DIRECTORY] [--msu PACK] [--enhanced-sky]\n"
+                "Usage: starfox_pcvr [--bundle Starfox-Assets.BIN] [--data-dir DIRECTORY] [--msu PACK] [--enhanced-sky] [--profile-csv FILE [--profile-frames N]]\n"
                 "--enhanced-sky: start with Enhanced Sky on (also in 2D Options); unsupported families remain native.\n"
+                "--profile-csv FILE: write per-frame CPU and available Vulkan GPU timestamps to FILE.\n"
+                "--profile-frames N: stop after N submitted frames in profiling mode (default 120; range 1..1000000).\n"
                 "Requires a Vulkan-capable GPU and an active OpenXR headset runtime.\n"
                 "Default bundle: beside this executable. Saves/settings: vr-data beside this executable.\n"
                 "Generate your own BIN with starfox_asset_builder; no cartridge is bundled.\n";
@@ -149,12 +157,24 @@ int main(int argc,char** argv) try {
             return 0;
         }
         if(option=="--enhanced-sky") {enhanced_sky=true;continue;}
+        if(option=="--profile-csv" && i+1<argc) {profile_csv=argv[++i];continue;}
+        if(option=="--profile-frames" && i+1<argc) {
+            const std::string_view value=argv[++i];unsigned frames{};
+            const auto parsed=std::from_chars(value.data(),value.data()+value.size(),frames);
+            if(parsed.ec!=std::errc{} || parsed.ptr!=value.data()+value.size() || frames==0 || frames>1000000) {
+                std::cerr<<"--profile-frames must be 1..1000000\n";return 2;
+            }
+            profile_frames=frames;continue;
+        }
         if(i+1>=argc || (option!="--bundle" && option!="--data-dir" && option!="--msu")) {
             std::cerr<<"Unknown or incomplete option: "<<option<<". Use --help.\n";return 2;
         }
         if(option=="--bundle") path_overrides.bundle=argv[++i];
         else if(option=="--data-dir") path_overrides.data_directory=argv[++i];
         else msu=argv[++i];
+    }
+    if(profile_frames && !profile_csv) {
+        std::cerr<<"--profile-frames requires --profile-csv\n";return 2;
     }
 #if defined(STARFOX_STEAM_FRAME)
     constexpr bool steam_frame=true;
@@ -192,7 +212,9 @@ int main(int argc,char** argv) try {
     starfox::vr::ApplicationHost host;
     // The diagnostic host defaults to 120 frames / 30 seconds. A player
     // executable must run until an actual exit, never expire mid-game.
-    host.frame_limit=0;host.time_limit=std::chrono::seconds(0);
+    host.frame_limit=profile_csv?profile_frames.value_or(120U):0U;
+    host.time_limit=std::chrono::seconds(0);
+    host.profile_csv_path=profile_csv;
     host.cartridge_save_path=data/"starfox-ex.srm";
     std::signal(SIGINT,interrupt);
     std::signal(SIGTERM,interrupt);

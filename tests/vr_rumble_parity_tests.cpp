@@ -240,6 +240,10 @@ int main(int argc,char** argv) try {
     const auto rom=starfox::assets::RomImage::load(argv[1]);
     const auto symbols=starfox::assets::SymbolMap::load(argv[2]);
     const auto reference=observe_flat(rom,symbols,enable_rumble);
+    std::size_t nonzero_pcm_samples=0;
+    for(const auto sample:reference.pcm) if(sample!=0) ++nonzero_pcm_samples;
+    if(nonzero_pcm_samples==0)
+        throw std::runtime_error("Rumble parity fixture produced no nonzero PCM samples");
     if(reference.video_phases!=120 || reference.logic_ticks!=40
         || reference.audio_blocks!=40 || reference.rumble_rasters!=120)
         throw std::runtime_error("Native 60 Hz driver missed its 120-raster reference cadence");
@@ -346,6 +350,7 @@ int main(int argc,char** argv) try {
         <<": 60 Hz flat matches 72/90/120 Hz VR game/audio/rumble with held steer/fire/boost/roll; 120 source rasters, "
         <<reference.logic_ticks<<" logic/audio ticks, duplicate eyes, production eye-camera pose variation, focus pause, and no-sink rule passed\n";
     std::cout<<"Active authored-rumble source samples: "<<reference.active_rumble_samples<<'\n';
+    std::cout<<"Nonzero PCM samples: "<<nonzero_pcm_samples<<'/'<<reference.pcm.size()<<'\n';
     return 0;
 } catch(const std::exception& error) {
     std::cerr<<error.what()<<'\n';

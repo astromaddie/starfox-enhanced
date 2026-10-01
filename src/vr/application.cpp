@@ -1,4 +1,5 @@
 #include "starfox/vr/application.hpp"
+#include "starfox/vr/profile_csv.hpp"
 #include "starfox/vr/enhanced_landscape.hpp"
 #include "starfox/render/background_renderer.hpp"
 #include "starfox/vr/frame_wait.hpp"
@@ -54,7 +55,27 @@
 #include <algorithm>
 #include <cmath>
 #include <charconv>
+#include <iomanip>
+#include <sstream>
+#ifndef STARFOX_SOURCE_REVISION
+#define STARFOX_SOURCE_REVISION "unknown"
+#endif
+#ifndef STARFOX_SOURCE_TREE_STATE
+#define STARFOX_SOURCE_TREE_STATE "unknown"
+#endif
 namespace {
+std::string csv_text(std::string_view value) {
+    std::string out="\"";
+    for(const auto character:value) {
+        if(character=='\"') out+="\"\"";
+        else if(character=='\r' || character=='\n') out+=' ';
+        else out+=character;
+    }
+    out+='\"';return out;
+}
+void csv_optional(std::ostream& stream,const std::optional<double>& value) {
+    if(value) stream<<std::setprecision(9)<<*value;
+}
 auto load_vr_backdrop(unsigned resource,std::string_view path) {
 #if defined(STARFOX_VR_BUNDLE_ASSETS)
     (void)path;return starfox::assets::embedded_asset(int(resource));
@@ -210,6 +231,14 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     if(preflight_frames && (graphics || loader_only)) {std::cerr<<"Preflight cannot be combined with a graphics/loader mode\n";return 1;}
     if(msu_path && !render_game) {std::cerr<<"--msu requires --render-game\n";return 1;}
     if(int(render_clear)+int(render_triangle)+int(render_model)+int(render_game)>1) {std::cerr<<"Choose one rendering mode\n";return 1;}
+    starfox::vr::ProfileCsvOutput profile_csv;
+    std::filesystem::path profile_path;
+    if(host.profile_csv_path) try {
+        if(host.profile_csv_path->empty()) throw std::runtime_error("Profiling CSV path is empty");
+        profile_path=std::filesystem::absolute(*host.profile_csv_path).lexically_normal();
+        if(!profile_csv.open(profile_path)) throw std::runtime_error("Cannot open profiling CSV for writing: "+profile_path.string());
+        std::cout<<"Per-frame VR profile: "<<profile_path<<"\n";
+    } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 2;}
     std::unique_ptr<LiveGame> live;
     std::optional<starfox::assets::RuntimeBundlePayload> bundle;
     if(render_game) try {
@@ -451,6 +480,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         std::cerr<<device.status()<<'\n';return 4;
     }
     std::cout<<device.status()<<'\n';
+    VkPhysicalDeviceProperties physical_properties{};
+    if(profile_csv.enabled()) {
+        const auto get_properties=reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(
+            loader.get_instance_proc_addr()(device.binding().instance,"vkGetPhysicalDeviceProperties"));
+        if(get_properties) get_properties(device.binding().physicalDevice,&physical_properties);
+    }
     starfox::vr::OpenXrSession session;
     if(!session.initialize(runtime.instance(),runtime.system(),&device.binding())) {
         std::cerr<<session.status()<<'\n';return 5;
@@ -590,7 +625,6 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     }
     starfox::vr::VulkanSceneBuffer vertices;
     VkPhysicalDeviceMemoryProperties properties{};
-    VkPhysicalDeviceProperties physical_properties{};
     if(render_triangle || render_model || render_game) {
         const auto get_memory=reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
             loader.get_instance_proc_addr()(device.binding().instance,"vkGetPhysicalDeviceMemoryProperties"));
@@ -623,11 +657,53 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     }
     starfox::vr::VulkanEyeCommands commands;
     if(live && !live->output.open()) {std::cerr<<live->output.status()<<'\n';return 8;}
-    if(!commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device)) {
+    const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled()
+        ?std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig>(
+            starfox::vr::VulkanEyeCommands::TimestampConfig{
+                device.timestamp_valid_bits(),device.timestamp_period_ns()})
+        :std::nullopt;
+    if(!commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) {
         std::cerr<<commands.status()<<'\n';return 8;
     }
     starfox::vr::VulkanEyeCommands ui_commands;
-    if(!ui_commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device)) return 8;
+    if(!ui_commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) return 8;
+    if(profile_csv.enabled()) {
+        XrInstanceProperties runtime_properties{XR_TYPE_INSTANCE_PROPERTIES};
+        std::string runtime_name="unknown";std::string runtime_version="unknown";
+        if(XR_SUCCEEDED(xrGetInstanceProperties(runtime.instance(),&runtime_properties))) {
+            runtime_name=runtime_properties.runtimeName;
+            runtime_version=std::to_string(runtime_properties.runtimeVersion);
+        }
+        const auto metadata=[&](std::string_view key,std::string_view value) {
+            profile_csv.stream()<<"# "<<key<<','<<csv_text(value)<<'\n';
+        };
+        metadata("format_version","1");
+        metadata("source_revision",STARFOX_SOURCE_REVISION);
+        metadata("source_tree_state",STARFOX_SOURCE_TREE_STATE);
+        metadata("openxr_runtime",runtime_name);
+        metadata("openxr_runtime_version",runtime_version);
+        metadata("vulkan_device",physical_properties.deviceName[0]?physical_properties.deviceName:"unknown");
+        metadata("vulkan_device_vendor_id",std::to_string(physical_properties.vendorID));
+        metadata("vulkan_device_id",std::to_string(physical_properties.deviceID));
+        metadata("vulkan_driver_version",std::to_string(physical_properties.driverVersion));
+        metadata("vulkan_api_version",std::to_string(device.api_version()));
+        metadata("queue_family_index",std::to_string(device.binding().queueFamilyIndex));
+        metadata("queue_timestamp_valid_bits",std::to_string(device.timestamp_valid_bits()));
+        metadata("queue_timestamp_period_ns",std::to_string(device.timestamp_period_ns()));
+        metadata("left_eye_timestamp_capability",commands.timestamp_status());
+        metadata("right_eye_timestamp_capability",commands.timestamp_status());
+        metadata("ui_timestamp_capability",ui_commands.timestamp_status());
+        metadata("gpu_duration_definition","Vulkan top-of-pipe to bottom-of-pipe queue timestamps; unavailable values are empty");
+        metadata("cpu_fence_definition","CPU submit-to-fence-observation elapsed time; not GPU time");
+        metadata("frame_limit",host.frame_limit?std::to_string(host.frame_limit):"unlimited");
+        profile_csv.stream()<<"frame_index,xr_display_time_ns,wall_elapsed_ms,completion_cadence_ms,"
+            <<"cpu_logic_ms,cpu_models_ms,cpu_upload_ms,cpu_layers_ms,"
+            <<"cpu_left_submit_to_fence_ms,cpu_right_submit_to_fence_ms,gpu_left_ms,gpu_right_ms,"
+            <<"cpu_ui_submit_to_fence_ms,gpu_ui_ms,scene_uploads,model_only_updates,"
+            <<"object_gpu_uploads,object_gpu_reuses,scene_vertex_buffers_uploaded,"
+            <<"scene_grid_outputs_allocated,scene_grid_outputs_reused,sprite_uploads,sprite_reuses\n";
+        if(!profile_csv.good()) {std::cerr<<"Writing profiling CSV metadata failed\n";return 8;}
+    }
     starfox::vr::VulkanStereoDraw ui_draw(ui_commands,ui_targets);
     starfox::vr::WorldPanelAnchor ui_anchor;
     bool ui_was_visible=false;
@@ -637,6 +713,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     const auto started=std::chrono::steady_clock::now();
     unsigned submitted=0;
     std::optional<XrTime> input_time;unsigned menu_presses=0;
+    struct CpuFrameProfile {
+        std::optional<double> logic_ms,models_ms,upload_ms,layers_ms;
+    } cpu_frame_profile;
+    std::array<std::optional<starfox::vr::VulkanStereoDraw::EyeTiming>,2> eye_frame_profile;
+    std::optional<starfox::vr::VulkanStereoDraw::EyeTiming> ui_frame_profile;
+    std::optional<std::chrono::steady_clock::time_point> last_profiled_submission;
     std::string game_error;
     std::vector<starfox::vr::DrawPacket> uploaded_packets;
     std::vector<uint32_t> uploaded_handles;
@@ -723,6 +805,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         renderer.set_head_translation(startup.presentation.translation_scale());
         const auto result=renderer.step_async([&](unsigned eye,uint32_t image,const auto& tracking_camera,XrTime time) {
             if(!input_time || time!=*input_time) {
+                cpu_frame_profile={};eye_frame_profile={};ui_frame_profile.reset();
                 // Both eyes share the preview; restore the real session only
                 // at the next frame boundary, before processing menu input.
                 if(parked_game) {preview_game=std::move(live);live=std::move(parked_game);}
@@ -1323,6 +1406,13 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         if(!backgrounds.update_models(model_updates)) throw std::runtime_error("Intro planet motion update failed");
                     }
                     const auto profile_end=std::chrono::steady_clock::now();
+                    if(profile_csv.enabled()) {
+                        const auto ms=[](auto a,auto b) {return std::chrono::duration<double,std::milli>(b-a).count();};
+                        cpu_frame_profile.logic_ms=ms(profile_start,profile_logic);
+                        cpu_frame_profile.models_ms=ms(profile_logic,profile_models);
+                        cpu_frame_profile.upload_ms=ms(profile_models,profile_upload);
+                        cpu_frame_profile.layers_ms=ms(profile_upload,profile_end);
+                    }
                     if(profile_end-last_profile>=std::chrono::seconds(1)) {
                         const auto completion=draw.take_completion_timing();
                         const auto ms=[](auto a,auto b) {return std::chrono::duration<double,std::milli>(b-a).count();};
@@ -1465,6 +1555,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             },[&](VkCommandBuffer command,VkExtent2D,const auto&,XrTime) {
                 if(ray_ready && !ray_frames[eye]->record_release(command)) throw std::runtime_error("Ray shadow release failed");
             },ray_ready?&ray_wait:nullptr);
+            if(profile_csv.enabled() && eye_result==StereoRenderer::EyeResult::complete && eye<eye_frame_profile.size())
+                eye_frame_profile[eye]=draw.take_last_eye_timing();
             if(eye_result==StereoRenderer::EyeResult::complete && eye<2 && ray_frames[eye]
                 && ray_frames[eye]->state()==VulkanDxrFrame::State::ready) ray_frames[eye]->retire();
             return eye_result;
@@ -1502,8 +1594,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                                 throw std::runtime_error("UI source scene recording failed");
                             if(!sprites.record(command,extent,camera)) throw std::runtime_error("UI source recording failed");
                         }
-                    });
+                });
                 if(result!=StereoRenderer::EyeResult::complete) return result;
+                if(profile_csv.enabled()) ui_frame_profile=ui_draw.take_last_eye_timing();
                 if(!ui_images.release()) return StereoRenderer::EyeResult::failed;
                 const bool overlay=startup.open?startup.runtime:live->history->current()->paused;
                 const float distance=overlay?overlay_panel_distance:interface_panel_distance;
@@ -1526,7 +1619,46 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         if(result==Result::error) {
             std::cerr<<"Eye rendering failed: "<<commands.status()<<"; "<<session.status()<<"; "<<swapchains.status()<<"; "<<input.status()<<"; "<<game_error<<'\n';return 8;
         }
-        if(result==Result::submitted) ++submitted;
+        if(result==Result::submitted) {
+            ++submitted;
+            if(profile_csv.enabled()) {
+                const auto now=std::chrono::steady_clock::now();
+                const auto wall_ms=std::chrono::duration<double,std::milli>(now-started).count();
+                const auto cadence_ms=last_profiled_submission
+                    ?std::optional<double>(std::chrono::duration<double,std::milli>(now-*last_profiled_submission).count())
+                    :std::nullopt;
+                last_profiled_submission=now;
+                const auto eye_cpu=[&](unsigned index)->std::optional<double> {
+                    return eye_frame_profile[index]
+                        ?std::optional<double>(eye_frame_profile[index]->submit_to_fence_cpu_ms):std::nullopt;
+                };
+                const auto eye_gpu=[&](unsigned index)->std::optional<double> {
+                    return eye_frame_profile[index]?eye_frame_profile[index]->gpu_timestamp_ms:std::nullopt;
+                };
+                profile_csv.stream()<<submitted<<',';
+                if(input_time) profile_csv.stream()<<*input_time;
+                profile_csv.stream()<<','<<std::setprecision(9)<<wall_ms<<',';csv_optional(profile_csv.stream(),cadence_ms);
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),cpu_frame_profile.logic_ms);
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),cpu_frame_profile.models_ms);
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),cpu_frame_profile.upload_ms);
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),cpu_frame_profile.layers_ms);
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),eye_cpu(0));
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),eye_cpu(1));
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),eye_gpu(0));
+                profile_csv.stream()<<',';csv_optional(profile_csv.stream(),eye_gpu(1));
+                profile_csv.stream()<<',';
+                if(ui_frame_profile) profile_csv.stream()<<ui_frame_profile->submit_to_fence_cpu_ms;
+                profile_csv.stream()<<',';
+                if(ui_frame_profile) csv_optional(profile_csv.stream(),ui_frame_profile->gpu_timestamp_ms);
+                const auto scene_vertices=scene.uploaded_vertex_buffers();
+                const auto scene_grid_allocations=scene.allocated_grid_outputs();
+                const auto scene_grid_reuses=scene.reused_grid_outputs();
+                profile_csv.stream()<<','<<scene_uploads<<','<<model_only_updates<<','<<gpu_uploads<<','<<gpu_reuses
+                    <<','<<scene_vertices<<','<<scene_grid_allocations<<','<<scene_grid_reuses
+                    <<','<<sprite_uploads<<','<<sprite_reuses<<'\n';
+                if(!profile_csv.good()) {std::cerr<<"Writing per-frame profiling CSV failed\n";return 8;}
+            }
+        }
         // A pending eye already performed a bounded, completion-aware fence
         // wait. Do not add another fixed millisecond after it.
         else if(!draw.pending()) frame_wait.pause();
@@ -1539,5 +1671,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     if(live) std::cout<<"Sprite layer uploads: "<<sprite_uploads<<"; unchanged source revisions reused: "<<sprite_reuses<<'\n';
     if(live) std::cout<<"Scene uploads: "<<scene_uploads<<"; transform-only reuse: "<<model_only_updates<<'\n';
     if(live) std::cout<<"Object GPU uploads: "<<gpu_uploads<<"; object resource reuses: "<<gpu_reuses<<'\n';
+    if(profile_csv.enabled() && !profile_csv.flush()) {
+        std::cerr<<"Flushing profiling CSV failed: "<<profile_path<<'\n';return 8;
+    }
     return 0;
 }

@@ -78,6 +78,23 @@ target_sources(starfox_vr_game PRIVATE src/vr/application.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/cartridge_save.cpp)
 target_link_libraries(starfox_vr_game PRIVATE SDL3::SDL3)
 target_link_libraries(starfox_vr_game PUBLIC starfox_vr_core starfox_core)
+execute_process(COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE STARFOX_SOURCE_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE STARFOX_GIT_REVISION_RESULT ERROR_QUIET)
+if(NOT STARFOX_GIT_REVISION_RESULT EQUAL 0 OR STARFOX_SOURCE_REVISION STREQUAL "")
+    set(STARFOX_SOURCE_REVISION unknown)
+endif()
+execute_process(COMMAND git -C "${PROJECT_SOURCE_DIR}" status --porcelain
+    OUTPUT_VARIABLE STARFOX_GIT_STATUS OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE STARFOX_GIT_STATUS_RESULT ERROR_QUIET)
+if(STARFOX_GIT_STATUS_RESULT EQUAL 0 AND STARFOX_GIT_STATUS STREQUAL "")
+    set(STARFOX_SOURCE_TREE_STATE clean)
+else()
+    set(STARFOX_SOURCE_TREE_STATE dirty)
+endif()
+target_compile_definitions(starfox_vr_game PRIVATE
+    "STARFOX_SOURCE_REVISION=\"${STARFOX_SOURCE_REVISION}\""
+    "STARFOX_SOURCE_TREE_STATE=\"${STARFOX_SOURCE_TREE_STATE}\"")
 include("${CMAKE_CURRENT_LIST_DIR}/VRAssets.cmake")
 if(WIN32)
     add_executable(starfox_vulkan_external_check EXCLUDE_FROM_ALL tools/check_vulkan_external_buffer.cpp)
@@ -183,6 +200,11 @@ if(NOT ANDROID)
     target_link_libraries(starfox_vr_device_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_targets_check tests/vulkan_eye_targets_tests.cpp)
     target_link_libraries(starfox_vr_targets_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_timestamp_check tests/vulkan_timestamp_tests.cpp)
+    target_link_libraries(starfox_vr_timestamp_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_profile_output_check tests/vr_profile_output_tests.cpp)
+    target_include_directories(starfox_vr_profile_output_check PRIVATE include)
+    target_compile_features(starfox_vr_profile_output_check PRIVATE cxx_std_20)
     add_executable(starfox_vr_scene_check tools/check_vulkan_scene.cpp)
     target_link_libraries(starfox_vr_scene_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_mesh_check tests/shape_mesh_tests.cpp)
@@ -195,12 +217,30 @@ if(NOT ANDROID)
         add_test(NAME starfox_pcvr_help COMMAND starfox_pcvr --help)
         set_tests_properties(starfox_pcvr_help PROPERTIES LABELS vr TIMEOUT 10
             PASS_REGULAR_EXPRESSION "Requires a Vulkan-capable GPU")
+        add_test(NAME starfox_vr_profile_cli
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/vr_profile_cli_tests.py"
+                "$<TARGET_FILE:starfox_pcvr>")
+        set_tests_properties(starfox_vr_profile_cli PROPERTIES LABELS vr TIMEOUT 10)
         add_test(NAME starfox_vr_shader_freshness
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_vr_shader_freshness.py"
                 --cmake "${CMAKE_COMMAND}" --generator "${CMAKE_GENERATOR}")
         set_tests_properties(starfox_vr_shader_freshness PROPERTIES LABELS vr TIMEOUT 120)
         add_test(NAME starfox_vr_ray_topology_check COMMAND starfox_vr_ray_topology_check)
         enable_testing()
+        add_test(NAME starfox_vr_timestamp_math COMMAND starfox_vr_timestamp_check --math-only)
+        add_test(NAME starfox_vr_timestamp_query COMMAND starfox_vr_timestamp_check)
+        add_test(NAME starfox_vr_profile_output_check COMMAND starfox_vr_profile_output_check)
+        set_tests_properties(starfox_vr_timestamp_math PROPERTIES LABELS vr TIMEOUT 5)
+        set_tests_properties(starfox_vr_profile_output_check PROPERTIES LABELS vr TIMEOUT 5)
+        set_tests_properties(starfox_vr_timestamp_query PROPERTIES
+            LABELS vr TIMEOUT 20 SKIP_RETURN_CODE 77)
+        option(STARFOX_REQUIRE_LAVAPIPE_TIMESTAMP_TEST
+            "Require native Lavapipe timestamp readback in host regression CI" OFF)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND STARFOX_REQUIRE_LAVAPIPE_TIMESTAMP_TEST)
+            add_test(NAME starfox_vr_timestamp_query_required
+                COMMAND starfox_vr_timestamp_check --require-native)
+            set_tests_properties(starfox_vr_timestamp_query_required PROPERTIES LABELS vr TIMEOUT 20)
+        endif()
         # These checks use mocks/synthetic inputs and need no connected HMD.
         # Keep hardware runtime/scene probes separate from unattended CTest.
         foreach(vr_check IN ITEMS

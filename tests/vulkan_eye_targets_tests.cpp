@@ -249,6 +249,13 @@ int main() try {
         require(timing.eyes==2 && timing.total_ms>=timing.maximum_ms && timing.maximum_ms>=0);
         require(draw.take_completion_timing().eyes==0);
     }
+    {
+        VulkanEyeCommands unsupported;
+        require(unsupported.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get,
+            VulkanEyeCommands::TimestampConfig{0,1000.}));
+        require(!unsupported.gpu_timestamps_available()
+            && unsupported.timestamp_status().find("timestampValidBits is zero")!=std::string::npos);
+    }
     targets.close();targets.close();
     require(destroyed_passes==1 && destroyed_views==4 && destroyed_frames==4);
     fail_frame=true;

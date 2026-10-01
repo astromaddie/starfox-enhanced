@@ -350,3 +350,54 @@ far-to-near/near-to-far anchor transitions. The native HUD specimen checker
 undoes the new overlay transform to preserve its exact source-pixel readback.
 Hardware compositor appearance, comfort/readability at 0.75 m, and actual
 wearer default/pilot acceptance remain pending. No performance claim is made.
+
+## Frame baseline and optional profiling output (915774e base)
+
+On the immutable `68cda35` device build, the wearer confirmed that the corrected
+gameplay HUD no longer has the large black backing, Original authored rumble
+responds to boost and destruction, and the Frame Menu plus View buttons return
+to Steam. Exact process cleanup semantics were not established. Separate
+runtime telemetry on the later `915774e` run recorded 4320x2160 at 90 Hz, while
+the application recommended 2016x2016 eye views. The wearer accepted the
+corrected depth on `915774e`; a tower-logo flicker was also reported for renderer
+follow-up. Comfort and sustained performance remain pending. These
+observations are separate from the profile implementation and do not establish
+a frame-time target.
+
+The desktop OpenXR player accepts `--profile-csv FILE` and optional
+`--profile-frames N` (default 120, range 1..1000000), enough for a 30-minute
+capture at 90 Hz (162000 submitted frames). For example, from a writable
+development directory on Frame:
+
+```
+./starfox_steamframe --profile-csv "$HOME/frame-90hz.csv" --profile-frames 162000
+```
+
+The CSV begins with comment metadata identifying source revision/tree state
+(captured at CMake configure time, so reconfigure after source changes),
+OpenXR runtime and version, Vulkan device/driver/API, selected queue family,
+timestamp valid bits/period, and per-eye/UI timestamp capability. Each row
+represents one completed stereo submission and includes host cadence, game
+logic/model/upload/layer CPU durations, per-eye CPU submit-to-fence time,
+separate per-eye Vulkan GPU timestamp duration when available, a UI command
+timing when recorded, and the existing scene/object/sprite upload and reuse
+counters. Empty GPU cells mean unavailable; CPU submit-to-fence is explicitly
+not GPU time. Query pools are reused and results are read after the existing
+fence completion without a query wait. No source clock, simulation, audio, or
+rumble behavior is changed by profiling. Compare cadence against the active
+90 Hz mode and the roughly 11.11 ms display interval; use the recorded
+per-eye GPU durations for GPU-work analysis and CPU columns for host work.
+
+Timestamp support is reported unavailable when the selected queue has zero
+timestamp-valid bits, invalid period metadata, missing query entry points, or
+query-pool/readback failure. A bounded real Vulkan query/readback regression
+is a required Linux host workflow test pinned to the installed Mesa Lavapipe
+ICD (`llvmpipe`), so missing native query support fails that job instead of
+being reported as skipped. The local macOS math and CLI checks passed; the
+default local Vulkan loader path reports unavailable. Two earlier MoltenVK
+query attempts and a later Vulkan-device mock check became uninterruptible
+macOS processes (PIDs 83385, 86099, and 90309); no further local native or
+exception-path probes were run. The 90309 device check did not complete. The
+query result and unsupported-device path therefore remain a Linux CI gate.
+No profile CSV, Frame performance baseline, optimization, or performance
+acceptance is claimed yet.
