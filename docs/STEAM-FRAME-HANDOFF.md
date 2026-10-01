@@ -625,3 +625,35 @@ physical fit and pose remain provisional. The source COCKPIT descriptor decodes
 to 83 vertices/66 faces; its intended live material state and native placement
 have not been established. Neither revised concept nor its final assets are
 approved. No cockpit geometry or extracted Nintendo assets entered Git.
+
+## Cockpit C asset preparation (October 1)
+
+The wearer selected concept C first. This selects the source COCKPIT design;
+final asset approval is still pending under the pasted UI working agreement.
+The private `cockpit-mockups/asset-package-c/asset-review.png` now presents the
+seated, lean, left, down and assembly views. Its manifest records provenance,
+materials, placement and file hashes. All 122 decoded source front triangles
+remain, with proposed silver/blue-grey flat materials. Seven new rear solids
+add 84 triangles; editable OBJ and packet geometry agree, with closed,
+consistently wound solids. The source instruments have no geometry occlusion
+in the tested preview views, and the conservative head box has no triangle
+overlap. These are desktop preparation checks, not headset comfort or native
+renderer evidence. Original source topology was checked; EX remains open.
+
+The proposed pilot reference is `(0, 0.28, 1.4)` metres in a 12x presentation
+ship reference, with the authored forebody visible ahead. This proposal must
+be implemented as a coherent presentation rig; gameplay/world scale remains
+unchanged. The source instrument face is approximately 1.25 metres ahead.
+Physical fit, binocular readability and calibration remain provisional.
+Private extracted source geometry and HUD pixels must not enter Git or public
+packages. Runtime source geometry must come from the user's asset bundle.
+No cockpit runtime construction has started.
+
+While preparing C, the official Devkit restored ordinary unlimited launcher
+arguments to `['LAUNCH-STEAM-FRAME.sh']`. Native runtime settings and all ten
+installed runtime files still match source `06f9065`; no executable payload
+was replaced and no launch was performed. Evidence is in
+`build/frame-devkit/artifacts/06f9065/launch-settings-restoration.json` and
+`official-devkit-normal-argv-restore.log`. The earlier temporary profile
+arguments are no longer active. Steering wearer verification and the motion
+profile/Valve capture remain pending.
