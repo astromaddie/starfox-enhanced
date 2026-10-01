@@ -770,3 +770,37 @@ framing-comparison.json confirms identical nose/effect/world/HUD packets and
 all rig matrices across the change, with unchanged front/rear materials and
 triangle counts. These remain CPU projections of production packets. Native
 GPU rendering, canopy fit and comfort still require device verification.
+
+## Cockpit C ARM64 delivery (October 1)
+
+Source `99712f52f66917c08c323c3f74d5dc1800aec3bf` was committed and pushed
+after coordinator diff, asset-provenance and rendered-packet review. Workflow
+`36873671425` passed all four jobs: ARM64, Linux, Windows PCVR and Quest.
+Linux passed 25/25 CTests, including the required native timestamp query
+(0.03 seconds) using `/usr/share/vulkan/icd.d/lvp_icd.json`.
+
+Runtime artifact `11167918958` has archive SHA-256
+`bde8c87cf4439eeddfc2ba43f44b70a8b8cd64b854210a35b44f3592001aaf95`.
+Diagnostics artifact `11167784185` has archive SHA-256
+`ae6def4ff5eed94d5218b38dc006279067f53ab13ab4b1fc0d47999ecb8f9fde`.
+Both matched GitHub digests and passed immutable package validation. Both
+metadata records identify the clean exact source and pinned dependencies.
+The ARM64 ELF SHA-256 is
+`c444a60232e5cd3b02277430d2cf55c817a7be326f141073f168aec518f4d658`.
+
+Fresh official Devkit status reported SteamOS `20260922.6101926`, gamescope,
+and no Star Fox process. The checkpoint
+`build/frame-devkit/checkpoints/preupload-99712f5-20261001T141913Z/`
+contains all seven current private files (10,246,136 bytes), verified against
+device hashes. Safe native upload preserved extras and settings, with checksum
+verification, no Steam restart, and ordinary unlimited launcher arguments.
+Native settings remain `steam_play=0` and `SteamLinuxRuntime_4-arm64`.
+Postchecks verified all ten runtime files (185,619,761 bytes) and all seven
+private files by size and SHA-256. No game launch occurred during upload.
+
+Delivery evidence is under `build/frame-devkit/artifacts/99712f5/`:
+`ci-evidence.json`, `official-devkit-upload.log`, and
+`post-upload-verification.json`. The uploaded cockpit is awaiting wearer
+readiness for launch. Natural health-ring alignment, binocular canopy fit,
+readability, steering comfort, motion/performance capture and the broader
+hardware acceptance gates remain open.
