@@ -86,6 +86,26 @@ Matrix4 presentation_scene_matrix(const GameSceneSnapshot& previous,const GameSc
     }
     return out;
 }
+std::optional<SteeringMatrix> cockpit_steering_matrix(const GameSceneSnapshot& scene,
+    const PresentationPreferences& preferences) {
+    if(!preferences.follow_ship_rotation || !pilot_view_active(scene,preferences) || scene.paused) return {};
+    auto physical=preferences;physical.world_scale=0;
+    physical.origin_x=physical.origin_y=physical.origin_z=0;
+    const auto cockpit=presentation_scene_matrix(scene,scene,1,physical);
+    auto source_view=identity_matrix;
+    for(unsigned c=0;c<3;++c) for(unsigned r=0;r<3;++r)
+        source_view[c*4+r]=float(scene.view_matrix[c*3+r])/32768.F*((c==0)==(r==0)?1.F:-1.F);
+    // Native steering moves on source world X/Y, not ship-local X/Y. Project
+    // those axes through the same source-view/cockpit basis as world geometry.
+    const auto axes=multiply_matrix(cockpit,source_view);
+    const float determinant=axes[0]*axes[5]-axes[4]*axes[1];
+    // The source movement plane has no unique 2D inverse when viewed edge-on.
+    if(!std::isfinite(determinant) || std::abs(determinant)<1e-6F) return {};
+    // Native Up increases world Y (screen down); C/D invert it. Conjugation
+    // retains that vertical preference on the displayed axis, including bank.
+    const float vertical=(scene.control_type&2U)?1.F:-1.F;
+    return SteeringMatrix{axes[0],vertical*axes[1],vertical*axes[4],axes[5]};
+}
 Matrix4 landscape_camera_motion(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha) {
     if(!std::isfinite(alpha)) throw std::invalid_argument("Invalid landscape camera fraction");
     alpha=std::clamp(alpha,0.,1.);

@@ -31,6 +31,7 @@ struct GameSceneSnapshot {
     // A live player reference is captured independently of draw visibility.
     std::optional<render::ObjectPresentationSnapshot> pilot_reference;
     bool pilot_tracking{};
+    uint8_t control_type{}; // Native C_TYPE; bit 1 inverts the vertical pad axis.
     render::ObjectSnapshotMap transforms;
     std::vector<GameSceneObject> objects; // Native draw-list order, never sorted.
     std::array<simulation::ParticleState,simulation::kMaximumParticles> particles{};
@@ -139,7 +140,7 @@ private:
     const simulation::GameSimulation& game_;
     const assets::RomImage& rom_;
     simulation::TrigTables trig_;
-    std::array<uint32_t,12> addresses_{};
+    std::array<uint32_t,13> addresses_{};
     std::array<uint32_t,2> tracking_strategies_{};
     std::array<uint32_t,11> model_addresses_{};
     uint32_t depth_tables_{};

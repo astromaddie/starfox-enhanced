@@ -522,3 +522,73 @@ HUD; ON has the inversely banked world and level HUD. It is a CPU wireframe
 projection (22 world packets, 2 HUD packets, no pending model issues), not a
 native shader, full background, compositor or headset capture. No known hanging
 macOS Vulkan probes were retried, and no private art or captures are packaged.
+
+## Cockpit follow steering and motion diagnosis (after 5967962)
+
+Build `5967962` passed hosted release checks, was uploaded and ran focused on
+Steam Frame. The wearer confirmed ship-follow rotation works, but reported
+rough/uncomfortable movement and steering that becomes unusable when banked
+sideways. The wearer explicitly authorized view-relative steering for this
+option. The proposed 3D cockpit asset package was rejected; no interior assets
+or construction are approved or included here. A visible cockpit remains
+separate pending work.
+
+When Cockpit and Follow Ship Rotation are both active, directional input now
+adapts once at the native logic-tick boundary. The adapter projects the native
+world X/Y movement plane through the same authored source-camera/ship basis as
+the presented world, then selects the closest native eight-way direction.
+At a quarter turn, physical stick-left therefore produces displayed leftward
+movement. Native `C_TYPE` vertical inversion remains relative to the displayed
+axes. Both SDL and OpenXR use this common path; face-button swaps, roll buttons,
+menu navigation, Existing camera, and rotation OFF retain their prior paths.
+The existing input threshold/latch runs before adaptation, preserving low
+analog magnitudes and quick taps without a second deadzone. An exactly edge-on
+movement plane has no unique two-axis mapping and retains native directions.
+
+The basis is the latest completed source tick, refreshed after every game tick
+inside a batched frame advance. It contains no HMD pose, presentation alpha or
+XR prediction time. No source frequency, gameplay movement algorithm, audio,
+rumble or camera interpolation changes are made. The adapter changes only the
+logical directional controls of the opted-in cockpit view.
+
+Local validation builds the PCVR player and passes presentation, input, camera
+and the new cockpit-input CTest checks (4/4). The new check also passes against
+both private Original and EX cartridges: actual source movement at 0/±90/180
+bank with native vertical inversion; all eight directions, low/full analog
+magnitudes, deadzones, pitch/yaw and rotated source view; latched taps and held
+bank transitions; inactive and menu bypasses. Identical raster-keyed control
+streams at 72/90/120 Hz and 100 ms batches produce identical complete native
+save states in both native Original timing and unlocked 20 Hz timing. An
+independent source-raster run derives the expected native tick count from
+`logic_tick_ready()`, rather than assuming a fixed logic rate. For both
+cartridges, this 72-raster-phase case yields 18 native-paced ticks or 24
+unlocked ticks, with every tick changing the ship basis and 24 audio blocks
+in either mode. Recording the adapted logical inputs and replaying them
+through the flat simulation produces the identical complete state in both
+timing modes. Hosted CI now includes
+the asset-free cockpit check; cartridge tests register only with private local
+inputs configured.
+
+A controlled 90 Hz CPU trajectory compared the existing `5967962` camera with
+the current build using identical logical source input, real Original gameplay,
+SPC output, unlocked 20 Hz source timing, 900 presentation samples and 199
+source ticks. This controlled trace does not use the wearer's native Original
+pace. The CSV trajectories
+are byte-identical. No camera discontinuity resets occurred. The camera basis
+determinant spans 0.999913–1.001004, with column lengths 0.999895–1.000403;
+there is no observed matrix collapse or amplified scale jump. During the
+source barrel roll, consecutive presentation increments are approximately
+13.75 degrees (maximum 13.751843 degrees per frame, about 1238 degrees/second).
+This demonstrates continuous interpolation of very fast authored rotation in
+this controlled 20 Hz case, not the rotation speed at native source pacing,
+headset frame pacing or comfort. No arbitrary
+smoothing was added. The reported roughness remains unverified on hardware;
+Frame profile/compositor cadence and wearer verification are still required.
+
+Private evidence is retained under `frame-ui/cockpit-controls` in the October 1
+visualization workspace: source input probes for Original/EX, `trajectory.cpp`,
+`trajectory-before`, `trajectory-after`, `baseline.csv`, `current.csv`, and
+`trajectory-comparison.json`. These traces deliberately keep logical input
+identical to isolate the camera; they do not simulate the new steering's
+changed gameplay path. No private ROMs, symbols or artwork enter Git or the
+package. No known hanging macOS Vulkan probes were retried.

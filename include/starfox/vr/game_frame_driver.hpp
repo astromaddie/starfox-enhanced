@@ -24,7 +24,8 @@ public:
         GameSceneHistory* scenes=nullptr,SourceRaster source_raster={});
     GameFrameDriver(const GameFrameDriver&)=delete;
     GameFrameDriver& operator=(const GameFrameDriver&)=delete;
-    GameFrameAdvance advance(XrTime predicted_time,const VrControls&,bool focused);
+    GameFrameAdvance advance(XrTime predicted_time,const VrControls&,bool focused,
+        const PresentationPreferences& presentation={});
     // After an explicit stage replacement: discard old input/audio timing.
     void reset_for_scene_change() noexcept;
 private:

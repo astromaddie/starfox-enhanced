@@ -930,7 +930,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         game_controls.fire=game_controls.bomb=game_controls.boost=game_controls.brake=false;
                         game_controls.steer={};game_controls.select=game_controls.select_pressed=false;
                     }
-                    const auto advance=live->driver->advance(time,game_controls,playing);
+                    const auto advance=live->driver->advance(time,game_controls,playing,startup.presentation);
                     if(!live->game.paused() && sandbox.active()) {
                         sandbox.commit(live->game.objects());live->history->capture();
                     }

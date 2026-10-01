@@ -1,4 +1,5 @@
 #include "starfox/vr/game_frame_driver.hpp"
+#include "starfox/vr/scene_interpolation.hpp"
 #include <stdexcept>
 namespace starfox::vr {
 void GameFrameDriver::reset_for_scene_change() noexcept {
@@ -13,7 +14,8 @@ GameFrameDriver::GameFrameDriver(simulation::GameSimulation& game,AudioTick audi
     if(scenes_ && &scenes_->game()!=&game_)
         throw std::invalid_argument("VR scene history belongs to a different game");
 }
-GameFrameAdvance GameFrameDriver::advance(XrTime time,const VrControls& controls,bool focused) {
+GameFrameAdvance GameFrameDriver::advance(XrTime time,const VrControls& controls,bool focused,
+    const PresentationPreferences& presentation) {
     if(failed_) throw std::runtime_error("VR game frame driver requires reconstruction after a failed tick");
     if(!audio_ || time<0) throw std::invalid_argument("Invalid VR frame time/audio callback");
     GameFrameAdvance result;
@@ -34,7 +36,11 @@ GameFrameAdvance GameFrameDriver::advance(XrTime time,const VrControls& controls
             if(source_raster_) source_raster_();
             if(game_.logic_tick_ready()) {
                 const bool options_open=game_.runtime_options_open();
-                const auto tick=game_.tick(input_.consume());++result.logic_ticks;
+                // capture() below refreshes this after every source tick,
+                // including multiple ticks in one XR advance.
+                const auto steering=scenes_ && !game_.in_setup_menu() && !game_.paused()
+                    ?cockpit_steering_matrix(*scenes_->current(),presentation):std::nullopt;
+                const auto tick=game_.tick(input_.consume(steering));++result.logic_ticks;
                 if(!options_open) apu_.insert(apu_.end(),tick.audio_port_writes.begin(),tick.audio_port_writes.end());
                 auto writes=game_.map().take_msu_register_writes();
                 if(!options_open) msu_.insert(msu_.end(),writes.begin(),writes.end());
