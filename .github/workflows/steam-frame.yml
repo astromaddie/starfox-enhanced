@@ -67,7 +67,8 @@ jobs:
         with:
           name: StarFoxEnhanced-steam-frame-configure-failure
           path: |
-            ${{ runner.temp }}/starfox-steam-frame-build/sysroot-pthread-link-layout.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/sysroot-link-normalization.json
+            ${{ runner.temp }}/starfox-steam-frame-build/sniper-sysroot/.starfox-sysroot-link-normalization.json
             ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeCache.txt
             ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeConfigureLog.yaml
             ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeError.log

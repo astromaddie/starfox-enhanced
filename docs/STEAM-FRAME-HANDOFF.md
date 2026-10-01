@@ -85,3 +85,20 @@ The ARM64 cross-build was not run locally: this host is macOS and does not
 provide the Linux Clang/LLD build environment. The build script exits before
 downloading the sysroot on non-Linux hosts. The hosted Linux CI job is the
 required first cross-build evidence.
+
+The CI run `36816034697` on source commit `9220065` passed Linux PCVR, desktop
+path and VR application regressions; Quest AAR/Prefab packaging and its package
+validator; and the existing Windows PCVR build/help smoke using MinGW-w64 GCC
+15.2. ARM64 configuration was the sole failing job. CMake's `-pthread` probe
+selected the SDK's static `libpthread.a` because the pinned sysroot's linker-name
+symlink used an absolute target; LLD then reported unresolved glibc loader
+internals. The archive also contains the matching shared `libpthread.so.0`.
+The build now normalizes all 38 absolute symlinks found in the pinned SDK's
+ARM64 linker roots to equivalent relative direct targets in the extracted
+build sysroot, leaving the downloaded archive and checksum unchanged. The
+checksum-verified archive inventory contained 335 absolute links overall;
+each of the 38 scoped targets resolved within the SDK. The remaining links are
+outside linker roots and are left as archived. The
+normalization report and its hash are included with hardware diagnostics and
+both artifact metadata files. The corrected ARM64 CI run remains required to
+confirm CMake and ELF dependency-closure behavior.

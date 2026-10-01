@@ -20,6 +20,8 @@ SNES_SPC_COMMIT = "ec8ee2bbe30451614c1d02a83f7af1c97d497d45"
 DR_LIBS_COMMIT = "b55a0d9a30b91ad8901f89ecf05f76a33186c185"
 XBRZ_COMMIT = "93c54433fa0df37c689c919e8152fb0b9136584a"
 SYSROOT_SNAPSHOT = "3.0.20260415.224995"
+SYSROOT_LINK_TRANSFORMATION = "absolute-sysroot-links-to-relative-direct-targets-v1"
+SYSROOT_LINK_COUNT = 38
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -74,6 +76,9 @@ def main() -> None:
     parser.add_argument("--package-root", type=pathlib.Path, required=True)
     parser.add_argument("--sysroot-archive", type=pathlib.Path, required=True)
     parser.add_argument(
+        "--sysroot-normalization-report", type=pathlib.Path, required=True
+    )
+    parser.add_argument(
         "--artifact-set",
         choices=("runtime-package", "hardware-diagnostics"),
         default="runtime-package",
@@ -89,10 +94,27 @@ def main() -> None:
     source_root = args.source_root.resolve()
     package_root = args.package_root.resolve()
     sysroot_archive = args.sysroot_archive.resolve()
+    normalization_report_path = args.sysroot_normalization_report.resolve()
     if not package_root.is_dir():
         raise SystemExit(f"package directory does not exist: {package_root}")
     if sha256(sysroot_archive) != SYSROOT_SHA256:
         raise SystemExit("Sniper ARM64 sysroot archive checksum mismatch")
+    normalization_report = json.loads(
+        normalization_report_path.read_text(encoding="utf-8")
+    )
+    if not isinstance(normalization_report, dict):
+        raise SystemExit("Sniper ARM64 sysroot link-normalization report is invalid")
+    normalization_entries = normalization_report.get("entries")
+    normalization_scope = normalization_report.get("scope")
+    if (normalization_report.get("format_version") != 1
+            or normalization_report.get("transformation") != SYSROOT_LINK_TRANSFORMATION
+            or normalization_report.get("normalized_absolute_symlinks") != SYSROOT_LINK_COUNT
+            or not isinstance(normalization_entries, list)
+            or len(normalization_entries) != SYSROOT_LINK_COUNT
+            or not isinstance(normalization_scope, list)
+            or not normalization_scope
+            or not all(isinstance(scope, str) for scope in normalization_scope)):
+        raise SystemExit("Sniper ARM64 sysroot link-normalization report is invalid")
 
     artifacts = {
         path.relative_to(package_root).as_posix(): sha256(path)
@@ -115,6 +137,12 @@ def main() -> None:
             "name": "Steam Runtime Sniper ARM64",
             "snapshot": SYSROOT_SNAPSHOT,
             "archive_sha256": SYSROOT_SHA256,
+            "link_normalization": {
+                "transformation": SYSROOT_LINK_TRANSFORMATION,
+                "absolute_symlinks": SYSROOT_LINK_COUNT,
+                "scope": normalization_scope,
+                "report_sha256": sha256(normalization_report_path),
+            },
         },
         "dependencies": {
             "SDL3": {"version": "3.4.14", "archive_sha256": SDL3_SHA256},

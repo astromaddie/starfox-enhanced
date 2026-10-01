@@ -26,6 +26,7 @@ REQUIRED_DIAGNOSTICS = {
     "starfox_vr_runtime_check",
     "STEAM-FRAME-DIAGNOSTICS.txt",
     "ELF-DEPENDENCIES.json",
+    "SYSROOT-LINK-NORMALIZATION.json",
     "BUILD-METADATA.json",
     "THIRD_PARTY_NOTICES.md",
     "CREDITS.md",
@@ -118,12 +119,37 @@ def validate(package: pathlib.Path, artifact_set: str = "runtime-package") -> No
               if name != "BUILD-METADATA.json"}
     if expected != actual:
         raise AssertionError("artifact payload does not match BUILD-METADATA.json checksums")
-    if metadata.get("sysroot", {}).get("archive_sha256") != (
+    sysroot = metadata.get("sysroot", {})
+    if sysroot.get("archive_sha256") != (
         "8e162d235aeb1e6d283ab028e2c7b933061abc1d59830829c9e311cc73b3dd20"
     ):
         raise AssertionError("metadata does not identify the pinned Sniper ARM64 sysroot")
+    normalization = sysroot.get("link_normalization", {})
+    report_sha256 = normalization.get("report_sha256", "")
+    if (normalization.get("transformation")
+            != "absolute-sysroot-links-to-relative-direct-targets-v1"
+            or normalization.get("absolute_symlinks") != 38
+            or not isinstance(normalization.get("scope"), list)
+            or not normalization.get("scope")
+            or not all(isinstance(scope, str) for scope in normalization["scope"])
+            or not isinstance(report_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", report_sha256)):
+        raise AssertionError("metadata does not identify the normalized Sniper linker paths")
 
     if artifact_set == "hardware-diagnostics":
+        normalization_report = json.loads(
+            files["SYSROOT-LINK-NORMALIZATION.json"].read_text(encoding="utf-8")
+        )
+        if (normalization_report.get("transformation")
+                != normalization.get("transformation")
+                or normalization_report.get("normalized_absolute_symlinks")
+                != normalization.get("absolute_symlinks")
+                or normalization_report.get("scope") != normalization.get("scope")
+                or len(normalization_report.get("entries", []))
+                != normalization.get("absolute_symlinks")
+                or sha256(files["SYSROOT-LINK-NORMALIZATION.json"])
+                != normalization.get("report_sha256")):
+            raise AssertionError("diagnostics report does not match the sysroot metadata")
         closure = json.loads(files["ELF-DEPENDENCIES.json"].read_text(encoding="utf-8"))
         for executable in executables:
             record = closure.get("executables", {}).get(executable)

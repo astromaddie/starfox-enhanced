@@ -16,6 +16,35 @@ from test_steam_frame_package import validate  # noqa: E402
 
 
 SYSROOT_SHA256 = "8e162d235aeb1e6d283ab028e2c7b933061abc1d59830829c9e311cc73b3dd20"
+SYSROOT_LINK_TRANSFORMATION = "absolute-sysroot-links-to-relative-direct-targets-v1"
+
+
+def normalization_report() -> dict[str, object]:
+    entries = [
+        {
+            "path": f"usr/lib/aarch64-linux-gnu/libfixture-{index}.so",
+            "original_target": f"/lib/aarch64-linux-gnu/libfixture-{index}.so",
+            "relative_target": f"../../../lib/aarch64-linux-gnu/libfixture-{index}.so",
+            "resolved_target": f"lib/aarch64-linux-gnu/libfixture-{index}.so",
+        }
+        for index in range(38)
+    ]
+    return {
+        "format_version": 1,
+        "transformation": SYSROOT_LINK_TRANSFORMATION,
+        "scope": [
+            "lib/aarch64-linux-gnu", "usr/lib/aarch64-linux-gnu", "lib64",
+            "usr/lib64", "lib/gcc/aarch64-linux-gnu",
+            "usr/lib/gcc/aarch64-linux-gnu",
+            "usr/lib/gcc-cross/aarch64-linux-gnu",
+        ],
+        "normalized_absolute_symlinks": len(entries),
+        "entries": entries,
+    }
+
+
+def normalization_report_bytes() -> bytes:
+    return (json.dumps(normalization_report(), indent=2, sort_keys=True) + "\n").encode()
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -33,7 +62,15 @@ def write_metadata(root: pathlib.Path, artifact_set: str) -> None:
         "artifact_set": artifact_set,
         "source": {"commit": "fixture", "tracked_diff_sha256": "fixture"},
         "toolchain": {"clang": "fixture"},
-        "sysroot": {"archive_sha256": SYSROOT_SHA256},
+        "sysroot": {
+            "archive_sha256": SYSROOT_SHA256,
+            "link_normalization": {
+                "transformation": SYSROOT_LINK_TRANSFORMATION,
+                "absolute_symlinks": 38,
+                "scope": normalization_report()["scope"],
+                "report_sha256": hashlib.sha256(normalization_report_bytes()).hexdigest(),
+            },
+        },
         "dependencies": {"SDL3": {"version": "3.4.14"}},
         "artifacts": payloads,
     }
@@ -85,6 +122,7 @@ def test_hardware_diagnostics(root: pathlib.Path) -> None:
             "dependencies": {"libc.so.6": "usr/lib/aarch64-linux-gnu/libc.so.6"},
         }
     (root / "STEAM-FRAME-DIAGNOSTICS.txt").write_text("diagnostics", encoding="utf-8")
+    (root / "SYSROOT-LINK-NORMALIZATION.json").write_bytes(normalization_report_bytes())
     (root / "ELF-DEPENDENCIES.json").write_text(
         json.dumps({"format_version": 1, "executables": executables}), encoding="utf-8"
     )

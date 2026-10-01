@@ -62,10 +62,12 @@ if [[ -z "${sysroot}" ]]; then
     exit 2
 fi
 sysroot="$(cd -- "${sysroot}" && pwd)"
-python3 "${source_root}/tests/test_steam_frame_sysroot_inspection.py"
-python3 "${source_root}/tools/inspect_steam_frame_sysroot.py" \
+sysroot_normalization_report="${build_root}/sysroot-link-normalization.json"
+python3 "${source_root}/tests/test_steam_frame_sysroot_preparation.py"
+python3 "${source_root}/tools/prepare_steam_frame_sysroot.py" \
     --sysroot "${sysroot}" \
-    --output "${build_root}/sysroot-pthread-link-layout.txt"
+    --output "${sysroot_normalization_report}" \
+    --expected-absolute-links 38
 
 toolchain="${source_root}/cmake/toolchains/linux-arm64-steamrt-sniper.cmake"
 common_cmake_args=(
@@ -107,6 +109,8 @@ mkdir -p -- "${diagnostics_root}"
 cp -- "${flat_build}/starfox_pc" "${diagnostics_root}/starfox_pc"
 cp -- "${vr_build}/starfox_vr_runtime_check" \
     "${diagnostics_root}/starfox_vr_runtime_check"
+cp -- "${sysroot_normalization_report}" \
+    "${diagnostics_root}/SYSROOT-LINK-NORMALIZATION.json"
 cp -- "${source_root}/tools/package/STEAM-FRAME-DIAGNOSTICS.txt" \
     "${diagnostics_root}/STEAM-FRAME-DIAGNOSTICS.txt"
 cp -- "${source_root}/THIRD_PARTY_NOTICES.md" "${source_root}/CREDITS.md" \
@@ -120,7 +124,8 @@ python3 "${source_root}/tests/test_steam_frame_package_validation.py"
 python3 "${source_root}/tools/write_steam_frame_metadata.py" \
     --source-root "${source_root}" \
     --package-root "${install_root}" \
-    --sysroot-archive "${sysroot_archive}"
+    --sysroot-archive "${sysroot_archive}" \
+    --sysroot-normalization-report "${sysroot_normalization_report}"
 python3 "${source_root}/tools/validate_steam_frame_elf.py" \
     --sysroot "${sysroot}" \
     --output "${diagnostics_root}/ELF-DEPENDENCIES.json" \
@@ -131,6 +136,7 @@ python3 "${source_root}/tools/write_steam_frame_metadata.py" \
     --source-root "${source_root}" \
     --package-root "${diagnostics_root}" \
     --sysroot-archive "${sysroot_archive}" \
+    --sysroot-normalization-report "${sysroot_normalization_report}" \
     --artifact-set hardware-diagnostics
 python3 "${source_root}/tests/test_steam_frame_package.py" "${install_root}"
 python3 "${source_root}/tests/test_steam_frame_package.py" \
