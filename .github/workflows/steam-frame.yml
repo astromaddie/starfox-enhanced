@@ -67,6 +67,7 @@ jobs:
         with:
           name: StarFoxEnhanced-steam-frame-configure-failure
           path: |
+            ${{ runner.temp }}/starfox-steam-frame-build/sysroot-pthread-link-layout.txt
             ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeCache.txt
             ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeConfigureLog.yaml
             ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeError.log
@@ -95,14 +96,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
       - name: Configure and build existing PCVR player
         shell: pwsh
         run: |
           cmake -S . -B build/steam-frame-windows-pcvr -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=C:/mingw64/bin/cc.exe `
+            -DCMAKE_CXX_COMPILER=C:/mingw64/bin/c++.exe `
             -DSTARFOX_BUILD_RUNTIME=ON `
             -DSTARFOX_BUILD_VR=ON `
             -DSTARFOX_BUILD_TESTS=OFF `

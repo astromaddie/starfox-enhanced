@@ -62,6 +62,10 @@ if [[ -z "${sysroot}" ]]; then
     exit 2
 fi
 sysroot="$(cd -- "${sysroot}" && pwd)"
+python3 "${source_root}/tests/test_steam_frame_sysroot_inspection.py"
+python3 "${source_root}/tools/inspect_steam_frame_sysroot.py" \
+    --sysroot "${sysroot}" \
+    --output "${build_root}/sysroot-pthread-link-layout.txt"
 
 toolchain="${source_root}/cmake/toolchains/linux-arm64-steamrt-sniper.cmake"
 common_cmake_args=(
