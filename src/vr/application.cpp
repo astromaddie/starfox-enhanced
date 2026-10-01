@@ -431,7 +431,18 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         std::cerr<<session.status()<<'\n';return 5;
     }
     starfox::vr::OpenXrInput input;
-    if(!input.initialize(runtime.instance(),session.handle())) {std::cerr<<input.status()<<'\n';return 5;}
+    if(!input.initialize(runtime.instance(),session.handle(),
+        runtime.supports_frame_controller_interaction())) {
+        std::cerr<<input.status()<<'\n';return 5;
+    }
+    struct RumbleShutdown {
+        starfox::vr::OpenXrInput& input;
+        const starfox::vr::ApplicationHost& host;
+        ~RumbleShutdown() {
+            input.stop_haptics();
+            if(host.stop_desktop_rumble) host.stop_desktop_rumble();
+        }
+    } rumble_shutdown{input,host};
     starfox::vr::OpenXrSwapchains swapchains;
     constexpr std::array<int64_t,4> formats{VK_FORMAT_R8G8B8A8_SRGB,VK_FORMAT_B8G8R8A8_SRGB,
         VK_FORMAT_R8G8B8A8_UNORM,VK_FORMAT_B8G8R8A8_UNORM};
@@ -630,30 +641,29 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 // Both eyes share the preview; restore the real session only
                 // at the next frame boundary, before processing menu input.
                 if(parked_game) {preview_game=std::move(live);live=std::move(parked_game);}
-                if(!input.poll(session.state()==XR_SESSION_STATE_FOCUSED)) return starfox::vr::StereoRenderer::EyeResult::failed;
-                auto controls=input.controls();
-                if(host.desktop_controls && session.state()==XR_SESSION_STATE_FOCUSED) {
-                    const auto pad=host.desktop_controls();
-                    if(std::hypot(pad.steer.x,pad.steer.y)>std::hypot(controls.steer.x,controls.steer.y))
-                        controls.steer=pad.steer;
-                    controls.fire|=pad.fire;controls.bomb|=pad.bomb;
-                    controls.boost|=pad.boost;controls.brake|=pad.brake;
-                    controls.menu|=pad.menu;controls.menu_pressed|=pad.menu_pressed;
-                    controls.roll_left|=pad.roll_left;controls.roll_right|=pad.roll_right;
-                    controls.select|=pad.select;controls.select_pressed|=pad.select_pressed;
-                    controls.stick_left|=pad.stick_left;controls.stick_right|=pad.stick_right;
-                    controls.reset_pressed|=pad.reset_pressed;
-                }
+                const bool session_focused=session.state()==XR_SESSION_STATE_FOCUSED;
+                if(!input.poll(session_focused)) return starfox::vr::StereoRenderer::EyeResult::failed;
+                const bool input_focused=input.focused();
+                const auto desktop_sample=host.desktop_controls
+                    ? host.desktop_controls() : starfox::vr::VrControls{};
+                const auto desktop_controls=input_focused
+                    ? desktop_sample : starfox::vr::VrControls{};
+                if(!input_focused && host.stop_desktop_rumble)
+                    host.stop_desktop_rumble();
+                auto controls=starfox::vr::select_vr_control_sources(
+                    input.controls(),desktop_controls);
                 input_time=time;if(controls.menu_pressed) ++menu_presses;
                 if(live) try {
                     const auto profile_start=std::chrono::steady_clock::now();
-                    const bool focused=session.state()==XR_SESSION_STATE_FOCUSED;
+                    const bool focused=input_focused;
                     if(focused && controls.reset_pressed) {
                         sandbox.cancel();
                         auto restarted=bundle?std::make_unique<LiveGame>(
                             starfox::assets::RomImage(initial_extended?bundle->starfox_ex_rom:bundle->original_rom),
                             starfox::assets::SymbolMap::parse(initial_extended?bundle->starfox_ex_symbols:bundle->original_symbols),msu_path,host,"INTROMAP")
                             :std::make_unique<LiveGame>(model_rom,model_symbols,msu_path,host,"INTROMAP");
+                        input.stop_haptics();
+                        if(host.stop_desktop_rumble) host.stop_desktop_rumble();
                         live->output.close();
                         if(!restarted->output.open()) throw std::runtime_error(restarted->output.status());
                         live=std::move(restarted);preview_game.reset();
@@ -693,6 +703,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             :std::make_unique<LiveGame>(rom_name.c_str(),symbol_name.c_str(),msu_path,host,"INTROMAP");
                         if(selected->game.peek_meter_state().extended!=startup.extended)
                             throw std::runtime_error("Selected VR experience files contain the wrong cartridge");
+                        input.stop_haptics();
+                        if(host.stop_desktop_rumble) host.stop_desktop_rumble();
                         live->output.close();
                         if(!selected->output.open()) throw std::runtime_error(selected->output.status());
                         live=std::move(selected);
@@ -761,7 +773,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         last_render_game=live.get();
                     }
                     const auto profile_logic=std::chrono::steady_clock::now();
-                    const auto alpha=live->game.paused() || session.state()!=XR_SESSION_STATE_FOCUSED?1.:live->game.logic_interpolation_alpha(advance.raster_fraction);
+                    const auto alpha=live->game.paused() || !focused?1.:live->game.logic_interpolation_alpha(advance.raster_fraction);
                     const bool srgb=swapchains.format()==VK_FORMAT_R8G8B8A8_SRGB || swapchains.format()==VK_FORMAT_B8G8R8A8_SRGB;
                     if(startup.open && (!startup_revision || *startup_revision!=startup.revision)) {
                         std::array<uint16_t,256> palette{};palette[1]=0x7fff;palette[2]=0x03ff;
@@ -1368,6 +1380,11 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         using Result=starfox::vr::StereoRenderer::Result;
         if(session.state()!=XR_SESSION_STATE_FOCUSED) {
             input.poll(false);
+            // Keep SDL's edge detector synchronized while XR focus suppresses
+            // controls, so a button held through resume does not become a new
+            // menu/select/reset press.
+            if(host.desktop_controls) static_cast<void>(host.desktop_controls());
+            if(host.stop_desktop_rumble) host.stop_desktop_rumble();
             if(live) static_cast<void>(live->driver->advance(input_time.value_or(0),{},false));
             if(live && !live->output.set_active(false)) {std::cerr<<live->output.status()<<'\n';return 8;}
         }

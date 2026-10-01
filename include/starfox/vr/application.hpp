@@ -12,8 +12,14 @@ struct ApplicationHost {
     unsigned frame_limit{120};
     std::chrono::seconds time_limit{30};
     std::function<bool()> stop_requested;
-    // Optional desktop gamepad input, sampled once per stereo frame.
+    // Optional desktop gamepad input, sampled during the stereo frame. Hosts
+    // must set active_actions for each usable action; arbitration ignores
+    // unmarked fields and falls back to desktop input per action.
     std::function<VrControls()> desktop_controls;
+    // Dual-band SDL fallback for cartridge-authored rumble when the active
+    // OpenXR profile has no usable haptic output action.
+    std::function<bool(std::uint16_t,std::uint16_t,std::uint32_t)> desktop_rumble;
+    std::function<void()> stop_desktop_rumble;
     std::filesystem::path cartridge_save_path;
 };
 // Shared experimental loop. Full game presentation parity remains incomplete.

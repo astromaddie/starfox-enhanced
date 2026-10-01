@@ -3,16 +3,25 @@
 #include <iostream>
 #include <stdexcept>
 namespace {
-unsigned creates=0,destroys=0;bool fail_system=false,graphics=true;unsigned eye_count=2;
+unsigned creates=0,destroys=0;bool fail_system=false,graphics=true,frame_extension=false;unsigned eye_count=2;
 bool change_eye_count=false;
 void check(bool value){if(!value) throw std::runtime_error("OpenXR runtime lifecycle assertion failed");}
 }
 extern "C" {
 XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char*,uint32_t capacity,uint32_t* count,XrExtensionProperties* out) {
-    *count=graphics?1:0;if(capacity && graphics) std::strcpy(out[0].extensionName,"XR_KHR_vulkan_enable2");return XR_SUCCESS;
+    *count=graphics?(frame_extension?2U:1U):0U;
+    if(capacity && graphics) {
+        std::strcpy(out[0].extensionName,"XR_KHR_vulkan_enable2");
+        if(frame_extension && capacity>1)
+            std::strcpy(out[1].extensionName,"XR_VALVE_frame_controller_interaction");
+    }
+    return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo* info,XrInstance* out) {
-    check(info->enabledExtensionCount==1 && std::strcmp(info->enabledExtensionNames[0],"XR_KHR_vulkan_enable2")==0);
+    check(info->enabledExtensionCount==(frame_extension?2U:1U)
+        && std::strcmp(info->enabledExtensionNames[0],"XR_KHR_vulkan_enable2")==0);
+    if(frame_extension) check(std::strcmp(info->enabledExtensionNames[1],
+        "XR_VALVE_frame_controller_interaction")==0);
     ++creates;*out=reinterpret_cast<XrInstance>(uintptr_t(1));return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrDestroyInstance(XrInstance instance) {check(instance!=XR_NULL_HANDLE);++destroys;return XR_SUCCESS;}
@@ -28,7 +37,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateViewConfigurationViews(XrInstance,XrSy
 int main()try {
     using namespace starfox::vr;
     {
-        OpenXrRuntime runtime;check(runtime.initialize());check(runtime.views().size()==2 && runtime.system()==9 && runtime.supports_vulkan());
+        OpenXrRuntime runtime;check(runtime.initialize());check(runtime.views().size()==2 && runtime.system()==9 && runtime.supports_vulkan()
+            && !runtime.supports_frame_controller_interaction());
         check(runtime.initialize() && creates==2 && destroys==1);
         fail_system=true;check(!runtime.initialize());check(creates==3 && destroys==3);
         check(runtime.instance()==XR_NULL_HANDLE && runtime.system()==XR_NULL_SYSTEM_ID && runtime.views().empty() && !runtime.supports_vulkan());
@@ -39,7 +49,9 @@ int main()try {
         change_eye_count=true;check(!runtime.initialize());
         check(runtime.instance()==XR_NULL_HANDLE && runtime.views().empty() && !runtime.supports_vulkan());
         change_eye_count=false;check(runtime.initialize());
+        frame_extension=true;
+        check(runtime.initialize() && runtime.supports_frame_controller_interaction());
     }
-    check(creates==7 && destroys==7);std::cout<<"OpenXR runtime initialization, failure cleanup, reinitialization and destruction passed\n";
+    check(creates==8 && destroys==8);std::cout<<"OpenXR runtime initialization, optional Frame extension, failure cleanup, reinitialization and destruction passed\n";
     return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

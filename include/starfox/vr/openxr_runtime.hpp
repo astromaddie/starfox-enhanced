@@ -20,10 +20,14 @@ public:
     const std::vector<XrViewConfigurationView>& views() const noexcept {return views_;}
     const std::string& status() const noexcept {return status_;}
     bool supports_vulkan() const noexcept {return vulkan_;}
+    bool supports_frame_controller_interaction() const noexcept {
+        return frame_controller_interaction_;
+    }
 private:
     XrInstance instance_{XR_NULL_HANDLE};
     XrSystemId system_{XR_NULL_SYSTEM_ID};
     bool vulkan_{};
+    bool frame_controller_interaction_{};
     std::vector<XrViewConfigurationView> views_;
     std::string status_{"OpenXR not initialized"};
 };

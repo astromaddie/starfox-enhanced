@@ -299,6 +299,7 @@ add_library(starfox_core
     src/simulation/particle_system.cpp
     src/simulation/path_vm.cpp
     src/simulation/prng.cpp
+    src/simulation/rumble_sequencer.cpp
     src/simulation/strategy_scheduler.cpp
     src/simulation/wdc65816.cpp
     src/timing/fixed_step.cpp
@@ -1382,6 +1383,10 @@ if(STARFOX_BUILD_TESTS)
     add_test(NAME starfox_raster_commands_tests COMMAND starfox_raster_commands_tests)
     target_link_libraries(starfox_core_tests PRIVATE starfox_core)
     add_test(NAME starfox_core_tests COMMAND starfox_core_tests)
+
+    add_executable(starfox_rumble_sequencer_tests tests/rumble_sequencer_tests.cpp)
+    target_link_libraries(starfox_rumble_sequencer_tests PRIVATE starfox_core)
+    add_test(NAME starfox_rumble_sequencer_tests COMMAND starfox_rumble_sequencer_tests)
 
     add_executable(starfox_msu1_pack_tests tests/msu1_pack_tests.cpp)
     target_link_libraries(starfox_msu1_pack_tests PRIVATE starfox_core)

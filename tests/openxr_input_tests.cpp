@@ -14,27 +14,79 @@ void require(bool value,const std::source_location where=std::source_location::c
 template<class T>T handle(uintptr_t n) {return reinterpret_cast<T>(n);}
 unsigned created{},destroyed{},suggestions{},syncs{},fail_create{};
 bool fail_read{},active=true,held{},attach_failed{},unsupported{};
-bool independent_buttons{};std::array<bool,14> button_states{};
+bool independent_buttons{};std::array<bool,18> button_states{};
+unsigned haptic_applies{},haptic_stops{};bool fail_haptic{},fail_haptic_stop{};
+float haptic_amplitude{};XrDuration haptic_duration{};
+bool haptic_api_valid=true;
 XrResult sync_result=XR_SUCCESS;XrVector2f axis{};
+std::array<XrPath,2> mock_hands{},mock_profiles{};
 XrResult XRAPI_PTR create_set(XrInstance,const XrActionSetCreateInfo* info,XrActionSet* out) {
     require(std::strcmp(info->actionSetName,"starfox")==0);*out=handle<XrActionSet>(1);return XR_SUCCESS;
 }
 XrResult XRAPI_PTR destroy_set(XrActionSet) {++destroyed;return XR_SUCCESS;}
 XrResult XRAPI_PTR create_action(XrActionSet,const XrActionCreateInfo* info,XrAction* out) {
     ++created;if(fail_create && created==fail_create) return XR_ERROR_RUNTIME_FAILURE;
-    const unsigned index=(created-1)%13;
-    require(info->actionType==((index==9 || index==10)?XR_ACTION_TYPE_POSE_INPUT:index==0?XR_ACTION_TYPE_VECTOR2F_INPUT:XR_ACTION_TYPE_BOOLEAN_INPUT));
+    const unsigned index=(created-1)%18;
+    const auto expected_type=(index==9 || index==10)?XR_ACTION_TYPE_POSE_INPUT
+        :index==0?XR_ACTION_TYPE_VECTOR2F_INPUT
+        :index==17?XR_ACTION_TYPE_VIBRATION_OUTPUT:XR_ACTION_TYPE_BOOLEAN_INPUT;
+    require(info->actionType==expected_type);
+    if(index==17) require(info->countSubactionPaths==2);
     *out=handle<XrAction>(index+1);return XR_SUCCESS;
 }
 std::vector<std::string> paths;
-XrResult XRAPI_PTR path(XrInstance,const char* name,XrPath* out) {require(name[0]=='/');paths.emplace_back(name);*out=paths.size();return XR_SUCCESS;}
+XrResult XRAPI_PTR path(XrInstance,const char* name,XrPath* out) {
+    require(name[0]=='/');paths.emplace_back(name);*out=paths.size();
+    if(std::strcmp(name,"/user/hand/left")==0) mock_hands[0]=*out;
+    if(std::strcmp(name,"/user/hand/right")==0) mock_hands[1]=*out;
+    return XR_SUCCESS;
+}
+XrPath path_value(const char* name) {
+    for(std::size_t i=paths.size();i>0;--i)
+        if(paths[i-1]==name) return static_cast<XrPath>(i);
+    return XR_NULL_PATH;
+}
 XrResult XRAPI_PTR suggest(XrInstance,const XrInteractionProfileSuggestedBinding* info) {
-    ++suggestions;require(info->countSuggestedBindings==6 || info->countSuggestedBindings==13);
-    if(info->countSuggestedBindings==13) {
+    ++suggestions;require(info->countSuggestedBindings==8
+        || info->countSuggestedBindings==15 || info->countSuggestedBindings==19);
+    if(info->countSuggestedBindings==19) {
+        require(paths.at(info->interactionProfile-1)
+            == "/interaction_profiles/valve/frame_controller_valve");
+        const std::array<std::pair<unsigned,const char*>,19> expected{{
+            {0,"/user/hand/left/input/thumbstick"},
+            {1,"/user/hand/right/input/a/click"},
+            {2,"/user/hand/right/input/b/click"},
+            {3,"/user/hand/right/input/x/click"},
+            {4,"/user/hand/right/input/y/click"},
+            {5,"/user/hand/right/input/menu/click"},
+            {6,"/user/hand/left/input/bumper/click"},
+            {7,"/user/hand/right/input/bumper/click"},
+            {8,"/user/hand/left/input/view/click"},
+            {11,"/user/hand/left/input/thumbstick/click"},
+            {12,"/user/hand/right/input/thumbstick/click"},
+            {9,"/user/hand/left/input/aim/pose"},
+            {10,"/user/hand/right/input/aim/pose"},
+            {13,"/user/hand/left/input/dpad_up/click"},
+            {14,"/user/hand/left/input/dpad_down/click"},
+            {15,"/user/hand/left/input/dpad_left/click"},
+            {16,"/user/hand/left/input/dpad_right/click"},
+            {17,"/user/hand/left/output/haptic"},
+            {17,"/user/hand/right/output/haptic"}}};
+        for(unsigned i=0;i<info->countSuggestedBindings;++i) {
+            const auto& binding=info->suggestedBindings[i];
+            const auto action=static_cast<unsigned>(reinterpret_cast<uintptr_t>(binding.action)-1);
+            const auto& name=paths.at(binding.binding-1);
+            // The Frame profile has dedicated View/Menu actions. It must not
+            // inherit the Touch left-grip Select / right-squeeze Menu aliases.
+            require(name!="/user/hand/left/input/squeeze/value"
+                && name!="/user/hand/right/input/squeeze/value");
+            require(action==expected[i].first && name==expected[i].second);
+        }
+    } else if(info->countSuggestedBindings==15) {
         const auto& profile=paths.at(info->interactionProfile-1);
         const bool index=profile=="/interaction_profiles/valve/index_controller";
         require(index || profile=="/interaction_profiles/oculus/touch_controller");
-        const std::array<const char*,13> expected{
+        const std::array<const char*,15> expected{
             "/user/hand/left/input/thumbstick", "/user/hand/right/input/a/click",
             "/user/hand/right/input/b/click",
             index?"/user/hand/left/input/a/click":"/user/hand/left/input/x/click",
@@ -44,14 +96,26 @@ XrResult XRAPI_PTR suggest(XrInstance,const XrInteractionProfileSuggestedBinding
             index?"/user/hand/right/input/trigger/click":"/user/hand/right/input/trigger/value",
             "/user/hand/left/input/squeeze/value", "/user/hand/left/input/aim/pose",
             "/user/hand/right/input/aim/pose", "/user/hand/left/input/thumbstick/click",
-            "/user/hand/right/input/thumbstick/click"};
+            "/user/hand/right/input/thumbstick/click",
+            "/user/hand/left/output/haptic",
+            "/user/hand/right/output/haptic"};
         std::array<bool,13> seen{};
         for(unsigned i=0;i<info->countSuggestedBindings;++i) {
             const auto& binding=info->suggestedBindings[i];const auto& name=paths.at(binding.binding-1);
             const auto action=reinterpret_cast<uintptr_t>(binding.action)-1;
-            require(action<expected.size());require(!seen[action]);seen[action]=true;
-            require(name==expected[action]);
+            if(i>=13U) require(action==17U && name==expected[i]);
+            else {
+                require(action<13U);require(!seen[action]);seen[action]=true;
+                require(name==expected[action]);
+            }
         }
+    } else {
+        require(paths.at(info->interactionProfile-1)
+            =="/interaction_profiles/khr/simple_controller");
+        require(info->suggestedBindings[6].action==handle<XrAction>(18)
+            && paths.at(info->suggestedBindings[6].binding-1)=="/user/hand/left/output/haptic");
+        require(info->suggestedBindings[7].action==handle<XrAction>(18)
+            && paths.at(info->suggestedBindings[7].binding-1)=="/user/hand/right/output/haptic");
     }
     return unsupported?XR_ERROR_PATH_UNSUPPORTED:XR_SUCCESS;
 }
@@ -59,10 +123,32 @@ XrResult XRAPI_PTR attach(XrSession,const XrSessionActionSetsAttachInfo* info) {
 XrResult XRAPI_PTR sync(XrSession,const XrActionsSyncInfo* info) {++syncs;require(info->countActiveActionSets==1);return sync_result;}
 XrResult XRAPI_PTR boolean(XrSession,const XrActionStateGetInfo* info,XrActionStateBoolean* out) {
     if(fail_read && info->action==handle<XrAction>(6)) return XR_ERROR_RUNTIME_FAILURE;
-    out->isActive=active;out->currentState=independent_buttons?button_states.at(reinterpret_cast<uintptr_t>(info->action)):held;return XR_SUCCESS;
+    const auto action=reinterpret_cast<uintptr_t>(info->action);
+    out->isActive=active;
+    out->currentState=action>=14 && action<=17
+        ?independent_buttons && button_states.at(action)
+        :independent_buttons?button_states.at(action):held;
+    return XR_SUCCESS;
 }
 XrResult XRAPI_PTR vector(XrSession,const XrActionStateGetInfo* info,XrActionStateVector2f* out) {
     require(info->action==handle<XrAction>(1));out->isActive=active;out->currentState=axis;return XR_SUCCESS;
+}
+XrResult XRAPI_PTR current_profile(XrSession,XrPath hand,XrInteractionProfileState* out) {
+    const auto index=hand==mock_hands[0]?0U:hand==mock_hands[1]?1U:2U;
+    require(index<2U);out->interactionProfile=mock_profiles[index];return XR_SUCCESS;
+}
+XrResult XRAPI_PTR apply_haptic(XrSession,const XrHapticActionInfo* info,
+    const XrHapticBaseHeader* header) {
+    haptic_api_valid &= info->action==handle<XrAction>(18);
+    const auto* vibration=reinterpret_cast<const XrHapticVibration*>(header);
+    haptic_api_valid &= vibration->frequency==XR_FREQUENCY_UNSPECIFIED;
+    haptic_amplitude=vibration->amplitude;haptic_duration=vibration->duration;
+    ++haptic_applies;
+    return fail_haptic?XR_ERROR_RUNTIME_FAILURE:XR_SUCCESS;
+}
+XrResult XRAPI_PTR stop_haptic(XrSession,const XrHapticActionInfo* info) {
+    haptic_api_valid &= info->action==handle<XrAction>(18);++haptic_stops;
+    return fail_haptic_stop?XR_ERROR_RUNTIME_FAILURE:XR_SUCCESS;
 }
 XrResult XRAPI_PTR create_space(XrSession,const XrActionSpaceCreateInfo* info,XrSpace* out) {
     require(info->poseInActionSpace.orientation.w==1);
@@ -209,10 +295,11 @@ int main() try {
         require(!restored.restore_preferences(std::span(preferences).first(15)));
         require(restored.preferences()==preferences);
     }
-    InputApi api{create_set,destroy_set,create_action,path,suggest,attach,sync,boolean,vector,create_space,destroy_space,locate};
+    InputApi api{create_set,destroy_set,create_action,path,suggest,attach,sync,boolean,
+        vector,current_profile,apply_haptic,stop_haptic,create_space,destroy_space,locate};
     OpenXrInput input(api);
     require(!input.poll(true));require(input.initialize(handle<XrInstance>(1),handle<XrSession>(2)));
-    require(created==13 && suggestions==3);
+    require(created==18 && suggestions==3);
     independent_buttons=true;
     require(input.poll(true) && !input.controls().reset_pressed);
     button_states[12]=button_states[13]=true;
@@ -223,6 +310,13 @@ int main() try {
     button_states[12]=true;require(input.poll(true) && !input.controls().reset_pressed);
     button_states[13]=true;require(input.poll(true) && input.controls().reset_pressed);
     require(input.poll(true) && !input.controls().reset_pressed); // Never repeat while held.
+    button_states[14]=true;
+    require(input.poll(true) && input.controls().steer.y>0.99F);
+    button_states[14]=false;button_states[15]=true;
+    require(input.poll(true) && input.controls().steer.y<-.99F);
+    button_states[15]=false;button_states[16]=button_states[17]=true;
+    require(input.poll(true) && input.controls().steer.x==0.0F);
+    button_states[16]=button_states[17]=false;
     require(input.poll(false));require(input.poll(true) && !input.controls().reset_pressed);
     independent_buttons=false;
     require(input.poll(false)); // Start the existing focus tests with unarmed buttons.
@@ -245,13 +339,96 @@ int main() try {
     require(!input.controls().menu_pressed); // Reconnected held button is not a fresh press.
     require(!input.controls().select_pressed);
     fail_read=true;require(!input.poll(true));require(!input.controls().fire && !input.controls().menu);
-    fail_read=false;sync_result=XR_SESSION_NOT_FOCUSED;require(input.poll(true));require(!input.controls().fire);
-    sync_result=XR_ERROR_RUNTIME_FAILURE;require(!input.poll(true));require(!input.controls().fire);
+    require(input.status().find("Read button")!=std::string::npos);
+    fail_read=false;sync_result=XR_SESSION_NOT_FOCUSED;
+    require(input.poll(true) && !input.focused() && !input.controls().fire);
+    sync_result=XR_ERROR_RUNTIME_FAILURE;require(!input.poll(true));
+    require(!input.focused() && !input.controls().fire);
+    sync_result=XR_SUCCESS;require(input.poll(true) && input.focused());
     input.close();require(destroyed==1);
     created=0;fail_create=3;require(!input.initialize(handle<XrInstance>(1),handle<XrSession>(3)));require(destroyed==2);
     fail_create=0;created=0;attach_failed=true;require(!input.initialize(handle<XrInstance>(1),handle<XrSession>(4)));require(destroyed==3);
     created=0;attach_failed=false;unsupported=true;require(input.initialize(handle<XrInstance>(1),handle<XrSession>(5)));
     input.close();require(destroyed==4);
+    unsupported=false;created=0;const auto frame_suggestions=suggestions;
+    sync_result=XR_SUCCESS;
+    require(input.initialize(handle<XrInstance>(1),handle<XrSession>(6),true));
+    require(created==18 && suggestions==frame_suggestions+4);
+    mock_profiles={path_value("/interaction_profiles/oculus/touch_controller"),
+        path_value("/interaction_profiles/oculus/touch_controller")};
+    require(input.poll(true) && input.haptics_available());
+    const starfox::simulation::RumbleEffect authored{0x1111U,0x8888U,40U};
+    require(input.apply_haptics(authored) && haptic_applies==2);
+    require(std::abs(haptic_amplitude-float(0x8888U)/65535.F)<.00001F
+        && haptic_duration==40'000'000 && haptic_api_valid);
+    const auto stops_before_focus=haptic_stops;
+    require(input.poll(false) && !input.focused()
+        && haptic_stops==stops_before_focus+2);
+    const auto applies_before_unfocused=haptic_applies;
+    require(!input.apply_haptics(authored) && haptic_applies==applies_before_unfocused);
+    require(input.poll(true) && input.focused());
+    require(input.apply_haptics(authored));
+    fail_haptic=true;
+    require(!input.apply_haptics(authored) && haptic_stops==stops_before_focus+4);
+    fail_haptic=false;
+    require(input.apply_haptics(authored));
+    fail_haptic_stop=true;input.stop_haptics();
+    require(haptic_stops==stops_before_focus+6
+        && input.status().find("Stop OpenXR haptics failed")!=std::string::npos);
+    fail_haptic_stop=false;
+    mock_profiles={path_value("/interaction_profiles/valve/frame_controller_valve"),
+        path_value("/interaction_profiles/valve/frame_controller_valve")};
+    require(input.poll(true) && input.haptics_available());
+    require(input.apply_haptics(authored)); // The advertised Frame binding is usable too.
+    mock_profiles={XR_NULL_PATH,XR_NULL_PATH};
+    const auto applies_before_unbound=haptic_applies;
+    require(input.poll(true) && input.focused() && !input.haptics_available());
+    require(!input.apply_haptics(authored) && haptic_applies==applies_before_unbound);
+    input.close();require(destroyed==5);
+
+    {
+        const auto bit=vr_control_bit;
+        VrControls xr,pad;
+        xr.active_actions=bit(VrControlAction::steer)|bit(VrControlAction::fire)
+            |bit(VrControlAction::menu);
+        pad.active_actions=xr.active_actions;
+        xr.steer={0.0F,0.0F};pad.steer={0.8F,0.0F};
+        xr.fire=false;pad.fire=true;
+        xr.menu=true;xr.menu_pressed=false;pad.menu=true;pad.menu_pressed=true;
+        auto selected=select_vr_control_sources(xr,pad);
+        require(selected.steer.x==0.0F && !selected.fire && !selected.menu_pressed);
+        xr.active_actions &= ~bit(VrControlAction::fire);
+        xr.active_actions &= ~bit(VrControlAction::menu);
+        selected=select_vr_control_sources(xr,pad);
+        require(selected.fire && selected.menu_pressed);
+
+        // A usable XR source wins only for its own active action. The desktop
+        // can still supply Menu when its XR binding is inactive.
+        xr.active_actions=bit(VrControlAction::fire);
+        xr.fire=false;xr.menu=false;xr.menu_pressed=false;
+        pad.menu=true;pad.menu_pressed=true;
+        selected=select_vr_control_sources(xr,pad);
+        require(!selected.fire && selected.menu && selected.menu_pressed);
+
+        DesktopControlEdges edges;
+        VrControls held;
+        held.active_actions=bit(VrControlAction::menu)|bit(VrControlAction::select)
+            |bit(VrControlAction::roll_left)|bit(VrControlAction::roll_right)
+            |bit(VrControlAction::stick_left)|bit(VrControlAction::stick_right);
+        held.menu=held.select=held.roll_left=held.roll_right=true;
+        held.stick_left=held.stick_right=true;
+        auto edge=edges.sample(held);
+        require(edge.menu_pressed && edge.select_pressed && edge.reset_pressed);
+        static_cast<void>(edges.sample(held)); // Held while unfocused; discard this sample.
+        edge=edges.sample(held); // Same level after focus resume is not a new press.
+        require(!edge.menu_pressed && !edge.select_pressed && !edge.reset_pressed);
+        selected=select_vr_control_sources({},edge);
+        require(selected.menu && !selected.menu_pressed
+            && selected.select && !selected.select_pressed && !selected.reset_pressed);
+        static_cast<void>(edges.sample({}));
+        edge=edges.sample(held);
+        require(edge.menu_pressed && edge.select_pressed && edge.reset_pressed);
+    }
     VrGameInput game_input;VrControls controls;
     controls.fire=true;controls.bomb=true;controls.boost=true;controls.brake=true;
     controls.roll_left=true;controls.roll_right=true;controls.steer={-1,1};
@@ -274,5 +451,16 @@ int main() try {
     controls.select_pressed=false;game_input.sample(controls);
     tick=game_input.consume();require(tick.pressed==0 && tick.held==starfox::input::select);
     game_input.sample({});tick=game_input.consume();require(tick.released==starfox::input::select);
+    {
+        VrGameInput face_buttons;
+        controls={};controls.fire=true;face_buttons.sample(controls);
+        require(face_buttons.consume().held==starfox::input::y); // Frame A fires.
+        face_buttons.reset();controls={};controls.bomb=true;face_buttons.sample(controls);
+        require(face_buttons.consume().held==starfox::input::a); // Frame B bombs.
+        face_buttons.reset();controls={};controls.boost=true;face_buttons.sample(controls);
+        require(face_buttons.consume().held==starfox::input::x); // Frame X boosts.
+        face_buttons.reset();controls={};controls.brake=true;face_buttons.sample(controls);
+        require(face_buttons.consume().held==starfox::input::b); // Frame Y brakes.
+    }
     std::cout<<"VR action lifecycle, focus, deadzone and edge tests passed (injected runtime)\n";
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
