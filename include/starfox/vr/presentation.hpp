@@ -23,6 +23,8 @@ inline Matrix4 multiply_matrix(const Matrix4& a,const Matrix4& b) noexcept {
         for(unsigned k=0;k<4;++k) out[c*4+r]+=a[k*4+r]*b[c*4+k];
     return out;
 }
+// Approved C base seat in the scaled ship reference; saved offsets remain additive.
+inline constexpr std::array<float,3> cockpit_seat_m{0.F,.28F,1.4F};
 inline constexpr float interface_panel_distance=1.75F;
 inline constexpr float interface_panel_width=1.15F;
 // Initial comfort value, pending wearer calibration. Keep the original angular size.

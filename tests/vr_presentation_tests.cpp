@@ -133,9 +133,11 @@ int main() try {
         auto on=off;on.follow_ship_rotation=true;
         for(unsigned axis=0;axis<3;++axis) {
             pilot.rotation_matrix=rotations[axis];now.pilot_reference=pilot;
-            close_matrix(presentation_scene_matrix(now,now,.5,off),identity_matrix);
+            auto off_rotation=presentation_scene_matrix(now,now,.5,off);
+            off_rotation[12]=off_rotation[13]=off_rotation[14]=0;
+            close_matrix(off_rotation,identity_matrix);
             const auto following=presentation_scene_matrix(now,now,.5,on);
-            const auto moved=point(following,axis==2?std::array<float,4>{1,0,-4,1}:std::array<float,4>{0,0,-4,1});
+            const auto moved=point(following,axis==2?std::array<float,4>{1,0,-4,0}:std::array<float,4>{0,0,-4,0});
             require(std::abs(moved[axis==0?1:axis==1?0:1]-(axis==2?.5F:-2.F))<.001F,
                 "Ship pitch/yaw/bank turned world in wrong direction");
             close_matrix(presentation_instrument_matrix(now,now,.5,on),identity_matrix);
@@ -154,6 +156,7 @@ int main() try {
             auto local=multiply_matrix(uncalibrated,model);
             auto expected=identity_matrix;
             expected[0]=on.scale()/256;expected[5]=expected[10]=-on.scale()/256;
+            for(unsigned i=0;i<3;++i)expected[12+i]=-cockpit_seat_m[i];
             close_matrix(local,expected,.001F);
             on.origin_x=25;on.origin_y=-15;on.origin_z=35;
             const auto scene=presentation_scene_matrix(now,now,.5,on);
@@ -163,7 +166,8 @@ int main() try {
             // Calibration uses physical metres in the rotating ship frame.
             for(unsigned i=0;i<3;++i)
                 require(std::abs(scene[12+i]-uncalibrated[12+i]-stable[12+i])<.001F,"Rotating pivot calibration scaled or changed axis");
-            const auto pivot=point(model,{.25F*256/on.scale(),.15F*256/on.scale(),-.35F*256/on.scale(),1});
+            const auto pivot=point(model,{.25F*256/on.scale(),
+                (.15F-cockpit_seat_m[1])*256/on.scale(),(-.35F-cockpit_seat_m[2])*256/on.scale(),1});
             const auto centered=point(scene,pivot);
             for(unsigned i=0;i<3;++i) require(std::abs(centered[i])<.001F,"Calibrated pilot pivot moved under rotation");
             // Application composes tracking on the left for every world pass.
@@ -223,8 +227,8 @@ int main() try {
         require(presentation_scene_matrix(before,now,.5,preferences)==identity_matrix,"Default camera changed");
         preferences.cockpit=true;
         const auto cockpit=presentation_scene_matrix(before,now,.5,preferences);
-        require(std::abs(cockpit[12]+1)<.001F && std::abs(cockpit[13]-.5F)<.001F
-            && std::abs(cockpit[14]-4)<.001F,"Pilot reference not in source view space");
+        require(std::abs(cockpit[12]+1)<.001F && std::abs(cockpit[13]-(.5F-cockpit_seat_m[1]))<.001F
+            && std::abs(cockpit[14]-(4-cockpit_seat_m[2]))<.001F,"Pilot reference not in source view space");
         preferences.origin_x=25;
         const auto offset=presentation_scene_matrix(before,now,.5,preferences);
         require(std::abs(offset[12]-cockpit[12]+.25F)<.001F,"Calibrated origin changed wrong axis");

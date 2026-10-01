@@ -9,8 +9,8 @@
 #include "starfox/vr/vulkan_connected_grid.hpp"
 namespace starfox::vr {
 SourceModelPackets SourceModels::assemble_world_interpolated(const GameSceneSnapshot& previous,
-    const GameSceneSnapshot& current,double alpha,bool srgb,bool surround_stars) {
-    auto result=assemble_interpolated(previous,current,alpha,srgb,256,surround_stars);
+    const GameSceneSnapshot& current,double alpha,bool srgb,bool surround_stars,bool cpu_pilot_rig) {
+    auto result=assemble_interpolated(previous,current,alpha,srgb,256,surround_stars,cpu_pilot_rig);
     auto dust=assemble_dust_interpolated(previous,current,alpha,srgb,256,true);
     const bool controls=current.flow==simulation::GameFlowState::controls_type
         || current.flow==simulation::GameFlowState::controls_choice;
@@ -487,7 +487,7 @@ SourceModelPackets SourceModels::assemble(const GameSceneSnapshot& scene,bool sr
     const auto shadows=scene.shadows_enabled?interpolate_scene_poses(scene,scene,1.,interpolation_,true):std::vector<render::RenderPose>{};
     return assemble_poses(scene,{},shadows,srgb,units,1.);
 }
-SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& scene,double alpha,bool srgb,float units,bool fixed_landscape_height) {
+SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& scene,double alpha,bool srgb,float units,bool fixed_landscape_height,bool cpu_pilot_rig) {
     if(!std::isfinite(alpha)) throw std::invalid_argument("Invalid scene interpolation fraction");
     if(previous.flow!=scene.flow || timing::camera_transform_is_discontinuous(previous.camera,scene.camera)) alpha=1.;
     auto rules=interpolation_;rules.fixed_landscape_height=fixed_landscape_height;
@@ -510,9 +510,9 @@ SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& 
         }
     }
     const auto shadows=scene.shadows_enabled?interpolate_scene_poses(previous,scene,alpha,rules,true):std::vector<render::RenderPose>{};
-    return assemble_poses(scene,poses,shadows,srgb,units,alpha);
+    return assemble_poses(scene,poses,shadows,srgb,units,alpha,cpu_pilot_rig);
 }
-SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,std::span<const render::RenderPose> poses,std::span<const render::RenderPose> shadows,bool srgb,float units,double alpha) {
+SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,std::span<const render::RenderPose> poses,std::span<const render::RenderPose> shadows,bool srgb,float units,double alpha,bool cpu_pilot_rig) {
     SourceModelPackets result;
     ++cache_epoch_;
     auto words=scene.cgram;
@@ -583,7 +583,8 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 pose.simple_sprite_colour=object.extended[21];
             }
             const uint32_t pass_key=uint32_t(item.handle)|(shadow?source_shadow_pass:0U);
-            if(compute_solids_ && (!shadow || compute_shadows_) && !pose.simple_scaled_sprite
+            if(compute_solids_ && !(cpu_pilot_rig && !shadow && (item.handle==scene.player
+                || (interpolation_.flash_player && object.strategy_address==interpolation_.flash_player))) && (!shadow || compute_shadows_) && !pose.simple_scaled_sprite
                 && !lod->second.faces.empty()
                 && pose.effect_clip_right<=pose.effect_clip_left) {
                 SourceSpanModel prepared;

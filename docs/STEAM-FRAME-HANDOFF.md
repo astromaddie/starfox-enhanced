@@ -657,3 +657,116 @@ was replaced and no launch was performed. Evidence is in
 `official-devkit-normal-argv-restore.log`. The earlier temporary profile
 arguments are no longer active. Steering wearer verification and the motion
 profile/Valve capture remain pending.
+
+## Approved Cockpit C runtime implementation (October 1, source reviewed)
+
+The wearer approved the prepared C package with “Yeah let's try it.” This
+supersedes the pending-approval state above; the rejected earlier package
+remains excluded. The shared VR runtime now constructs C in active Cockpit
+view. Existing camera remains the default, preferences retain their current
+format, and Follow ship rotation/source-tick steering are unchanged.
+
+The front is decoded from the user's runtime bundle, preserving all 122
+triangles and applying the approved flat, two-sided face materials. Actual
+Original and EX bundles have identical ordered COCKPIT positions and face
+ranges despite different descriptor addresses and some palette colours. A
+geometry signature and per-face range validation reject incompatible topology
+before applying the material map. Only the seven newly authored rear solids
+(84 triangles), new materials and their generator enter Git. No extracted
+cartridge mesh, pixel, ROM, symbol dump or generated bundle is added.
+
+The live player's source forebody replaces the former zero-scale hidden ship.
+Its source-local geometry is clipped at pilot Z = -0.065 metres, then placed
+in the approved 12x presentation ship reference. The base pilot seat is
+(0, 0.28, 1.4) metres; saved user-origin offsets are additive. Cabin, nose and
+instruments share the existing ship-frame presentation transform. World scale,
+source reticle rays, gameplay, source timing and physical HMD/eye poses remain
+unchanged. Front/rear caches have 32 brightness/colour-space slots per live
+cartridge; changing nose/effect geometry is rebuilt without an accumulating
+cache. Only the player and exact native FLASHPLAYER strategy use CPU geometry
+in this view; other resident model indices and packets remain intact.
+
+The wearer requested the health-ring wireframe as a calibration reference.
+The native player flash is a separate FLASHPLAYER_STRAT object, already
+anchored to the player's authored pose by source interpolation. Cockpit view
+now places its complete source geometry and materials in the same 12x ship
+and seat reference as the nose, retaining native blink and lifetime. It is
+not clipped to the forebody, and other effects are not generalized into this
+path. A controlled fixture seeds the existing FLASHPLAYER_ISTRAT initializer
+and then lets native ticks drive the effect. Both bundled cartridges produce
+9 visible and 11 hidden phases. Packet checks register it to the actual source
+camera/player pose and the nose under Follow ON/OFF, saved origin offsets,
+and both tested world scales. This demonstrates the native effect's alignment;
+a natural health-ring pickup and its exact caller remain wearer verification.
+
+Original Layout A retains the approved mount. EX's actual single-player band
+extends from source X=6 to 196 rather than fitting the approved 141-pixel-wide
+band. A fixed uniform 141/190 fit centres it on the same face without changing
+source art or aspect ratio. Full/empty health, zero/max bombs and inactive,
+two-line and three-line communications fit the face with the identical mount
+on every frame. This makes EX lettering physically smaller (about 2.26 mm per
+source pixel versus Original's 3.05 mm); binocular readability is still a
+hardware gate. Existing Layout A boss-health and EX multiplayer top-row
+placements are preserved; they are outside this approved single-player panel
+fit and have not been redesigned. Both cartridge checks verify that enabling
+a boss meter retains its geometry and packet ordering through the mount, with
+no band clipping; its native headset visibility/readability remains open.
+Mounted HUD packets test cabin/world depth
+but do not write depth, preserving coplanar source portrait/glyph layering.
+World and ordinary overlay depth defaults retain their prior behaviour.
+
+Local verification before the implementation commit (base a670f4e):
+
+- PCVR and the affected geometry, presentation, input and pipeline test targets
+  build successfully in build/host-vr.
+- Seven focused CTests pass: presentation, cockpit geometry, cockpit input,
+  OpenXR input, eye camera, generated asset freshness, and the positive cockpit
+  depth-policy check. The existing complete Linux pipeline gate is retained.
+- The actual Starfox-Assets.BIN passes the production geometry path for both
+  Original and EX: 122 front + 84 rear + 7 clipped live-nose triangles in the
+  captured first-active-pilot scenes, unchanged complete simulation state,
+  unchanged other object geometry, valid resident indices, preserved HUD art,
+  fixed HUD bounds and the seeded native repair alignment described above.
+- Private production-packet dumps and CPU raster projections are retained in
+  frame-ui/cockpit-c-runtime in the October 1 visualization workspace. Views
+  include original/ex seated, lean, look-left, look-down and repair with Follow
+  ON/OFF. The renderer consumes production packet geometry, matrices and HUD
+  texels, uses a neutral background and labels its CPU-only status. Root
+  inspected the cabin/nose against approved C; the refreshed EX look-down view
+  demonstrates the repaired panel fit. These are not native GPU readbacks.
+
+No known hanging macOS native Vulkan probes were retried. The broad mocked
+pipeline test still encounters the previously observed macOS negative-path
+exception abort (“Flush vertex memory: -5”); the isolated positive depth-policy
+check passes. Linux CI must execute the complete required checks and GPU path.
+Native headset rendering, natural ring pickup, seated fit, occlusion and stereo
+readability remain open. Coordinator source and rendered-packet review passed;
+ARM64 packaging and device launch follow the implementation commit.
+
+### Window framing correction before delivery
+
+After inspecting the repair-overlay projection, the wearer requested a much
+wider, lower V window. The source COCKPIT topology is established for both
+cartridges, but its native canopy-to-ship placement is not established by the
+specimen decode. Nose/repair registration alone does not establish canopy fit.
+The following adjustment is an explicitly provisional presentation calibration,
+not a claim about the original game's native placement.
+
+The upper shell widens by 70% and moves down 0.16 metres. A continuous blend
+is zero at Y=-0.72 metres (the instrument-face top) and reaches full strength
+at Y=-0.48 metres. The same coordinate mapping applies to source front and new
+rear solids, retaining shared connections; topology, triangle counts and
+materials do not change. The source-derived forward window lip moves from
+X=±0.27,Y=-0.39,Z=-2.03 to X=±0.459,Y=-0.55,Z=-2.03 metres. Instrument face,
+HUD mount, seat, nose, complete repair effect and world scale stay fixed.
+
+Both actual bundled cartridge tests pass the new lip/pinned-panel assertions,
+nondegenerate front/rear triangles, previous head/follow/calibration checks,
+HUD bounds and native repair registration. PCVR builds and all seven focused
+CTest checks still pass. Private before-framing/ images and eight packet dumps
+retain the prior state; comparison-original/ex-{seated,lean,look-left,look-down,
+repair-follow,repair-existing-rotation}.png provide matched before/after views.
+framing-comparison.json confirms identical nose/effect/world/HUD packets and
+all rig matrices across the change, with unchanged front/rear materials and
+triangle counts. These remain CPU projections of production packets. Native
+GPU rendering, canopy fit and comfort still require device verification.

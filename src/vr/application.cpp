@@ -4,6 +4,7 @@
 #include "starfox/render/background_renderer.hpp"
 #include "starfox/vr/frame_wait.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
+#include "starfox/vr/cockpit.hpp"
 #include "starfox/vr/cartridge_save.hpp"
 #include "starfox/vr/openxr_input.hpp"
 #include "starfox/vr/vulkan_device.hpp"
@@ -98,6 +99,7 @@ struct LiveGame {
     std::vector<int16_t> mixed;
     starfox::vr::PcmOutput output;
     starfox::vr::SourceModels models;
+    starfox::vr::CockpitGeometry cockpit;
     starfox::render::ScaledTextRenderer dialogue_layout;
     starfox::vr::EnhancedLandscape enhanced_landscape;
     std::unique_ptr<starfox::vr::GameSceneHistory> history;
@@ -116,7 +118,7 @@ struct LiveGame {
              const starfox::vr::ApplicationHost& host,const char* level="LEVEL1_1",bool discard=false)
         :rom(std::move(image)),symbols(std::move(table)),rumble_sequencer(symbols),
          cartridge_save(discard || symbols.find("PLANETSEQ2_L").empty()?std::filesystem::path{}:host.cartridge_save_path),
-         game(rom,symbols,level,cartridge_save.initial(),true),models(rom,symbols,true,!discard),
+         game(rom,symbols,level,cartridge_save.initial(),true),models(rom,symbols,true,!discard),cockpit(rom,symbols),
          dialogue_layout(rom,symbols),enhanced_landscape(symbols),discard_audio(discard) {
         game.set_timing_mode(starfox::simulation::TimingMode::unlocked_20_fps);
         if(msu_path) {
@@ -607,13 +609,15 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     if(ray_supported) {render::shadows::DxrShadows probe(*device.adapter_luid());ray_supported=probe.available();}
     starfox::vr::VulkanDrawPackets sprites;
     starfox::vr::VulkanDrawPackets hud;
+    starfox::vr::VulkanDrawPackets cabin;
+    bool uploaded_cockpit_hud=false;
     starfox::vr::VulkanDrawPackets backgrounds;
     starfox::vr::VulkanDrawPackets tunnel_surround;
     starfox::vr::VulkanDrawPackets surrounding_stars;
     starfox::vr::VulkanDrawPackets startup_panel;
     starfox::vr::VulkanDrawPackets sandbox_pointer;
     starfox::vr::PauseSandbox sandbox;
-    for(auto* packets:{&scene,&sprites,&hud,&backgrounds,&tunnel_surround,&surrounding_stars,&startup_panel})
+    for(auto* packets:{&scene,&sprites,&hud,&cabin,&backgrounds,&tunnel_surround,&surrounding_stars,&startup_panel})
         packets->set_pipeline_cache(&shader_cache);
     starfox::vr::VulkanScenePipeline pipeline;
     if(render_triangle && !pipeline.initialize(device.binding().device,get_device,targets.render_pass(),true)) {
@@ -968,7 +972,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         *live->history->current(),alpha,startup.presentation);
                     presentation_transform=starfox::vr::presentation_scene_matrix(*live->history->previous(),
                         *live->history->current(),alpha,startup.presentation);
-                    auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true);
+                    const bool cockpit_active=pilot_view_active(*live->history->current(),startup.presentation);
+                    auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true,cockpit_active);
                     if(live->game.paused()) {
                         if(!sandbox.active()) {
                             starfox::vr::SourceModels picking(live->rom,live->symbols,false,false);
@@ -983,14 +988,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             std::span<const starfox::vr::DrawPacket>(&pointer,1),{},false))
                             throw std::runtime_error(sandbox_pointer.status());
                     }
-                    if(pilot_view_active(*live->history->current(),startup.presentation)) {
-                        // Collapse only the player visual; never alter source visibility,
-                        // collision, reticles, attached effects or the authored draw list.
-                        for(std::size_t i=0;i<packets.handles.size();++i)
-                            if(packets.handles[i]==live->history->current()->player) {
-                                packets.packets[i].model={};packets.packets[i].model[15]=1;
-                            }
-                    }
+                    auto cabin_packets=live->cockpit.assemble(packets,*live->history->current(),startup.presentation,srgb);
+                    if(!cabin.initialize(device.binding().device,get_device,properties,targets.render_pass(),cabin_packets,{},true))
+                        throw std::runtime_error(cabin.status());
                     const auto profile_models=std::chrono::steady_clock::now();
                     if(!packets.pending.empty()) throw std::runtime_error("Live model pass incomplete: "+packets.pending.front().reason);
                     // Stars form the distant environment, not depth-writing
@@ -1091,12 +1091,13 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             float(snapshot->source_vanishing_point[1])+16.F).value();
                     }
                     if(!sprite_revision || *sprite_revision!=snapshot->revision
-                        || uploaded_enhanced_sky!=startup.enhanced_sky) {
+                        || uploaded_enhanced_sky!=startup.enhanced_sky || uploaded_cockpit_hud!=cockpit_active) {
                         if(!snapshot->ppu) throw std::runtime_error("Live sprite pass has no PPU snapshot");
                         const bool compact_hud=snapshot->meters.enabled && !world_panel_scene(*snapshot);
                         live->dialogue_layout.set_language(uint8_t(startup.language));
                         auto next_hud=compact_hud?layout_a_instrument_packets(live->rom,live->symbols,*snapshot,live->dialogue_layout,srgb)
                             :std::vector<DrawPacket>{};
+                        if(cockpit_active)mount_cockpit_instruments(next_hud,snapshot->meters.extended);
                         auto packet=starfox::vr::source_sprite_packet(*snapshot->ppu,snapshot->display_brightness,{},srgb,&snapshot->meters,
                             nullptr,compact_hud?SourceSpritePass::world:SourceSpritePass::all);
                         // World/aim sprites retain the native viewing rays.
@@ -1308,8 +1309,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                                 throw std::runtime_error(sprites.status());
                             uploaded_sprites.assign(next_sprites.begin(),next_sprites.end());++sprite_uploads;
                         }
-                        if(!hud.initialize(device.binding().device,get_device,properties,targets.render_pass(),next_hud,{},false))
+                        if(!hud.initialize(device.binding().device,get_device,properties,targets.render_pass(),next_hud,{},cockpit_active,false))
                             throw std::runtime_error(hud.status());
+                        uploaded_cockpit_hud=cockpit_active;
                         sprite_revision=snapshot->revision;
                         uploaded_enhanced_sky=startup.enhanced_sky;
                     }
@@ -1537,6 +1539,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     throw std::runtime_error("Native sprite layer recording failed");
                 auto instrument_camera=tracking_camera;
                 instrument_camera.view=multiply_matrix(tracking_camera.view,instrument_transform);
+                if(render_game && !cabin.record(command,extent,instrument_camera))
+                    throw std::runtime_error("Cockpit geometry recording failed");
                 if(render_game && !hud.record(command,extent,instrument_camera))
                     throw std::runtime_error("Compact HUD recording failed");
                 if(circle_over_hud) draw_circle();

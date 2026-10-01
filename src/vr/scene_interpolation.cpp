@@ -64,7 +64,9 @@ Matrix4 presentation_scene_matrix(const GameSceneSnapshot& previous,const GameSc
     const auto view=simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
     const auto rotation=simulation::interpolate_rotation_matrix_q15(old?old->rotation_matrix:now.rotation_matrix,now.rotation_matrix,alpha);
     // Calibration is in physical centimetres even when source world scale changes.
-    const double local[]{preferences.origin_x*2.56/scale,-preferences.origin_y*2.56/scale,-preferences.origin_z*2.56/scale};
+    const double local[]{(preferences.origin_x*.01+cockpit_seat_m[0])*256/scale,
+        -(preferences.origin_y*.01+cockpit_seat_m[1])*256/scale,
+        -(preferences.origin_z*.01+cockpit_seat_m[2])*256/scale};
     double point[]{player.x,player.y,player.z};
     for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) point[r]+=local[c]*rotation[c*3+r]/32768.;
     const double origin[]{camera.x,camera.y,camera.z};

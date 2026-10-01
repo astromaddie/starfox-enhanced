@@ -1,0 +1,264 @@
+#include "starfox/vr/cockpit.hpp"
+#include "starfox/vr/source_sprites.hpp"
+#include "starfox/assets/runtime_bundle.hpp"
+#include "starfox/audio/spc700_audio.hpp"
+#include "starfox/render/scaled_text_renderer.hpp"
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <source_location>
+#include <stdexcept>
+using namespace starfox;using namespace starfox::vr;
+namespace {
+void require(bool value,const std::source_location& where=std::source_location::current()) {
+    if(!value)throw std::runtime_error("Cockpit geometry regression at "+std::to_string(where.line()));
+}
+std::array<float,3> point(const Matrix4& m,const float* p) {
+    std::array<float,3> result{};
+    for(unsigned r=0;r<3;++r) {result[r]=m[12+r];for(unsigned c=0;c<3;++c)result[r]+=m[c*4+r]*p[c];}
+    return result;
+}
+void near(float a,float b) {require(std::abs(a-b)<.001F);}
+void verify_rig() {
+    auto rear=cockpit_rear_packet();require(rear.geometry.vertices.size()==7*12*3);
+    for(const auto& v:rear.geometry.vertices)require(v.position[1]<-.49F && !v.visibility_enabled && !v.texture[3]);
+    auto black=cockpit_rear_packet(false,0);for(const auto& v:black.geometry.vertices)require(v.color[0]==0 && v.color[3]==1);
+    DrawPacket player;
+    for(auto p:std::array<std::array<float,3>,3>{{{0,0,30},{10,0,30},{0,10,0}}}) {
+        SceneVertex v{};std::copy(p.begin(),p.end(),v.position);v.color[0]=p[2]/30;v.color[3]=1;
+        v.visibility_enabled=v.group_enabled=1;player.geometry.vertices.push_back(v);
+    }
+    const auto nose=cockpit_forebody_packet(player);require(nose.geometry.vertices.size()==6);
+    bool cut=false;
+    for(const auto& v:nose.geometry.vertices) {
+        require(v.position[2]<=cockpit_nose_cut_z+.00001F && !v.visibility_enabled && !v.group_enabled);
+        if(std::abs(v.position[2]-cockpit_nose_cut_z)<.00001F) {cut=true;near(v.color[0],.065F*256/30);}
+    }
+    require(cut);near(nose.model[0],12);near(nose.model[13],-.28F);near(nose.model[14],-1.4F);
+    for(auto& v:player.geometry.vertices)v.position[2]=0;
+    require(cockpit_forebody_packet(player).geometry.vertices.empty());
+    std::vector<DrawPacket> hud(1);hud[0].model=overlay_panel_matrix();mount_cockpit_instruments(hud);
+    const float anchor[]{76,175,0};const auto mounted=point(hud[0].model,anchor);
+    near(mounted[0],-.015F);near(mounted[1],-.852F);near(mounted[2],-1.243F);
+    GameSceneSnapshot scene;scene.flow=simulation::GameFlowState::gameplay;scene.pilot_tracking=true;
+    scene.view_matrix={32767,0,0,0,32767,0,0,0,32767};scene.pilot_reference.emplace();
+    scene.pilot_reference->rotation_matrix={0,32767,0,-32767,0,0,0,0,32767};
+    PresentationPreferences prefs;prefs.cockpit=true;
+    for(bool follow:{false,true}) {
+        prefs.follow_ship_rotation=follow;
+        const auto rig=presentation_instrument_matrix(scene,scene,1,prefs);
+        const float cabin_reference[]{.76F,1.75F,0};
+        const auto centre=point(rig,cabin_reference); // Rotation changes ship-local points only when not following.
+        if(follow) {near(centre[0],.76F);near(centre[1],1.75F);}else {near(centre[0],1.75F);near(centre[1],-.76F);}
+        auto calibrated=prefs;calibrated.origin_x=16;calibrated.origin_y=4;calibrated.origin_z=-10;
+        const auto offset=presentation_instrument_matrix(scene,scene,1,calibrated);
+        const float origin[]{.16F,.04F,-.1F};const auto transformed=point(rig,origin);
+        for(unsigned i=0;i<3;++i)near(offset[12+i],-transformed[i]);
+        for(unsigned scale:{0U,5U}) {
+            calibrated.world_scale=scale;require(presentation_instrument_matrix(scene,scene,1,calibrated)==offset);
+        }
+        XrView view{XR_TYPE_VIEW};view.pose.orientation.w=1;view.fov={-.7F,.7F,.7F,-.7F};
+        const auto seated=eye_camera(view,1,.05F).value();view.pose.position={.16F,.04F,0};
+        const auto leaned=eye_camera(view,1,.05F).value();
+        const float cabin_point[]{.3F,-.4F,-1.5F};
+        const auto a=point(multiply_matrix(seated.view,rig),cabin_point);
+        const auto b=point(multiply_matrix(leaned.view,rig),cabin_point);
+        near(b[0]-a[0],-.16F);near(b[1]-a[1],-.04F);
+    }
+    assets::Shape invalid;bool rejected=false;
+    try {(void)cockpit_front_packet(invalid);}catch(const std::runtime_error&) {rejected=true;}
+    require(rejected);
+}
+void dump(const std::string& file,std::span<const DrawPacket> cabin,std::span<const DrawPacket> hud,
+    const Matrix4& rig,const Matrix4& world,std::span<const DrawPacket> source) {
+    std::ofstream out(file);out<<"{\"rig\":[";
+    for(unsigned i=0;i<16;++i)out<<(i?",":"")<<rig[i];out<<"],\"world\":[";
+    for(unsigned i=0;i<16;++i)out<<(i?",":"")<<world[i];out<<"],\"packets\":[";bool first=true;
+    const auto packets=[&](auto items,const char* group) {for(const auto& p:items) {
+        if(!first)out<<',';first=false;out<<"{\"group\":\""<<group<<"\",\"model\":[";
+        for(unsigned i=0;i<16;++i)out<<(i?",":"")<<p.model[i];out<<"],\"vertices\":[";bool vertex_first=true;
+        for(const auto& v:p.geometry.vertex_view()) {
+            if(!vertex_first)out<<',';vertex_first=false;out<<"{\"p\":["<<v.position[0]<<','<<v.position[1]<<','<<v.position[2]<<"],\"c\":[";
+            for(unsigned i=0;i<4;++i)out<<(i?",":"")<<v.color[i];out<<"],\"uv\":["<<v.uv[0]<<','<<v.uv[1]<<"],\"t\":[";
+            for(unsigned i=0;i<4;++i)out<<(i?",":"")<<v.texture[i];out<<"]}";
+        }
+        out<<"],\"lines\":[";bool lfirst=true;
+        for(const auto& v:p.geometry.line_view()) {out<<(lfirst?"":",")<<'[';lfirst=false;
+            for(unsigned c=0;c<3;++c)out<<(c?",":"")<<v.position[c];
+            for(float c:v.color)out<<','<<c;out<<']';}
+        out<<"],\"texels\":[";bool tfirst=true;for(auto t:p.geometry.texel_view()){out<<(tfirst?"":",")<<t;tfirst=false;}out<<"]}";
+    }};
+    packets(cabin,"cabin");packets(hud,"hud");packets(source,"world");out<<"]}\n";
+}
+void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::string& evidence) {
+    simulation::GameSimulation game(rom,symbols,"LEVEL1_1",{},true);audio::Spc700Audio audio;
+    game.set_timing_mode(simulation::TimingMode::unlocked_20_fps);
+    GameSceneHistory history(game,rom,symbols);
+    PresentationPreferences prefs;prefs.cockpit=true;
+    for(unsigned tick=0;tick<2400 && !pilot_view_active(*history.current(),prefs);++tick) {
+        auto result=game.tick({});(void)audio.render_logic_tick(result.audio_port_writes);
+        game.synchronize_apu_output_ports(audio.output_ports());history.capture();
+    }
+    const auto scene=*history.current();require(pilot_view_active(scene,prefs));
+    SourceModels models(rom,symbols,true,true);CockpitGeometry cockpit(rom,symbols);
+    const auto defaults=models.assemble_world_interpolated(scene,scene,1,false,true);
+    auto world=models.assemble_world_interpolated(scene,scene,1,false,true,true);require(world.pending.empty());
+    require(defaults.handles==world.handles);
+    for(size_t i=0;i<world.handles.size();++i)if(world.handles[i]!=scene.player)
+        require(same_draw_geometry(std::span(&world.packets[i],1),std::span(&defaults.packets[i],1)));
+    for(const auto& model:world.compute_models)
+        require(model.packet_index<world.handles.size() && world.handles[model.packet_index]==model.key && model.key!=scene.player);
+    const auto before=world;const auto saved=game.save_state();
+    auto off=prefs;off.cockpit=false;require(cockpit.assemble(world,scene,off).empty());
+    require(same_draw_geometry(world.packets,before.packets));
+    const auto cabin=cockpit.assemble(world,scene,prefs);require(cabin.size()==3);
+    require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==252 && !cabin[2].geometry.vertices.empty());
+    for(size_t i=0;i<world.handles.size();++i) {
+        if(world.handles[i]==scene.player)require(world.packets[i].geometry.vertex_view().empty() && world.packets[i].model==identity_matrix);
+        else require(same_draw_geometry(std::span(&world.packets[i],1),std::span(&before.packets[i],1)) && world.packets[i].model==before.packets[i].model);
+    }
+    require(game.save_state()==saved);
+    for(const auto& model:world.compute_models)
+        require(model.packet_index<world.handles.size() && world.handles[model.packet_index]==model.key);
+    for(const auto& p:cabin)for(const auto& v:p.geometry.vertex_view())require(!v.visibility_enabled && !v.group_enabled);
+    // Source-derived window lip moves from +/-0.27,-0.39 to +/-0.459,-0.55m;
+    // its instrument face is pinned, not stretched together with the canopy.
+    const auto has_front_point=[&](float x,float y,float z) {
+        return std::any_of(cabin[0].geometry.vertices.begin(),cabin[0].geometry.vertices.end(),[&](const auto& v) {
+            return std::abs(v.position[0]-x)<.001F && std::abs(v.position[1]-y)<.001F && std::abs(v.position[2]-z)<.001F;
+        });
+    };
+    require(has_front_point(-.459F,-.55F,-2.03F) && has_front_point(.459F,-.55F,-2.03F));
+    require(has_front_point(.21F,-.72F,-1.25F) && has_front_point(-.24F,-.99F,-1.25F));
+    for(const auto& packet:std::span(cabin).first(2))for(size_t i=0;i<packet.geometry.vertices.size();i+=3) {
+        const auto& a=packet.geometry.vertices[i];const auto& b=packet.geometry.vertices[i+1];const auto& c=packet.geometry.vertices[i+2];
+        const float ux=b.position[0]-a.position[0],uy=b.position[1]-a.position[1],uz=b.position[2]-a.position[2];
+        const float vx=c.position[0]-a.position[0],vy=c.position[1]-a.position[1],vz=c.position[2]-a.position[2];
+        const float nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+        require(nx*nx+ny*ny+nz*nz>1e-12F);
+    }
+    render::ScaledTextRenderer text(rom,symbols);auto hud=layout_a_instrument_packets(rom,symbols,scene,text);
+    const auto original_hud=hud;mount_cockpit_instruments(hud,scene.meters.extended);require(same_draw_geometry(hud,original_hud));
+    const auto fits_face=[&](const auto& packets) {for(const auto& packet:packets)for(const auto& vertex:packet.geometry.vertex_view()) {
+        const auto position=point(packet.model,vertex.position);
+        require(position[0]>=-.229F && position[0]<=.203F && position[1]>=-.964F && position[1]<=-.744F);
+    }};
+    fits_face(hud);
+    for(unsigned bombs:{0U,scene.meters.extended?5U:3U}) {
+        auto variation=game.restored_state(saved);variation->map().write_native_word(symbols.find(scene.meters.extended?"SPECWEPCNTONE":"SPECWEPCNT").at(0),uint16_t(bombs));
+        (void)variation->tick({});(void)variation->tick({});GameSceneHistory varied_history(*variation,rom,symbols);
+        for(bool full:{false,true})for(unsigned comms=0;comms<3;++comms) {
+            auto varied=*varied_history.current();varied.meters.damage=full?varied.meters.player_health_max:0;
+            varied.dialogue.active=comms!=0;varied.dialogue.text_visible=true;varied.dialogue.three_lines=comms==2;
+            varied.dialogue.text_address=symbols.find("MSG_1").at(0);
+            auto packets=layout_a_instrument_packets(rom,symbols,varied,text);
+            mount_cockpit_instruments(packets,varied.meters.extended);fits_face(packets);
+            require(packets[0].model==hud[0].model && packets[1].model==hud[1].model);
+        }
+    }
+    // Boss meters retain the existing top-row placement and packet ordering.
+    // They are intentionally not cropped into the approved single-player band.
+    auto boss_scene=scene;boss_scene.meters.boss_health=100;boss_scene.meters.boss_max_health=180;
+    auto boss_hud=layout_a_instrument_packets(rom,symbols,boss_scene,text);
+    const auto boss_source=boss_hud;
+    require(boss_hud.size()==original_hud.size());
+    require(boss_hud[1].geometry.vertex_view().size()>original_hud[1].geometry.vertex_view().size());
+    mount_cockpit_instruments(boss_hud,boss_scene.meters.extended);
+    require(same_draw_geometry(boss_hud,boss_source));
+    bool outside_band=false;
+    for(const auto& vertex:boss_hud[1].geometry.vertex_view())
+        outside_band|=point(boss_hud[1].model,vertex.position)[1]>-.744F;
+    require(outside_band);
+    assets::ShapeDecoder decoder(rom,symbols);auto front=decoder.decode_by_name(symbols,"COCKPIT");
+    front.faces[0].vertex_indices.pop_back();bool rejected=false;
+    try {(void)cockpit_front_packet(front);}catch(const std::runtime_error&) {rejected=true;}require(rejected);
+    for(unsigned inactive=0;inactive<3;++inactive) {
+        auto other=scene;if(inactive==0)other.pilot_tracking=false;if(inactive==1)other.pilot_reference.reset();if(inactive==2)other.flow=simulation::GameFlowState::title;
+        require(cockpit.assemble(world,other,prefs).empty());
+    }
+    if(!evidence.empty())for(bool follow:{false,true}) {
+        prefs.follow_ship_rotation=follow;
+        dump(evidence+(follow?"-follow.json":"-existing-rotation.json"),cabin,hud,
+            presentation_instrument_matrix(scene,scene,1,prefs),presentation_scene_matrix(scene,scene,1,prefs),world.packets);
+    }
+    // Seed the same native FLASHPLAYER initializer as the existing desktop
+    // capture fixture. Native ticks own its shape, material, blink and lifetime.
+    const auto flash=game.objects().allocate_after();require(flash!=0);
+    auto& effect=game.objects().at(flash);const auto ship=game.objects().at(game.player());
+    effect.world_x=ship.world_x;effect.world_y=ship.world_y;effect.world_z=ship.world_z;
+    effect.shape=ship.shape;effect.colour_table=ship.colour_table;
+    effect.rotation_x=ship.rotation_x;effect.rotation_y=ship.rotation_y;effect.rotation_z=ship.rotation_z;
+    effect.strategy_address=symbols.find("FLASHPLAYER_ISTRAT").at(0);
+    unsigned visible=0,hidden=0;bool captured=false;
+    for(unsigned tick=0;tick<80 && game.objects().is_active(flash);++tick) {
+        auto result=game.tick({});(void)audio.render_logic_tick(result.audio_port_writes);
+        game.synchronize_apu_output_ports(audio.output_ports());history.capture();
+        const auto now=*history.current();
+        if(!pilot_view_active(now,prefs))continue;
+        auto native=models.assemble_world_interpolated(*history.previous(),now,.5,false,true,true);
+        require(native.pending.empty());
+        const auto slot=std::find(native.handles.begin(),native.handles.end(),flash);
+        if(slot==native.handles.end()) {++hidden;continue;}
+        const auto index=size_t(slot-native.handles.begin());const auto source=native.packets[index];
+        if(source.geometry.vertex_view().empty() && source.geometry.line_view().empty()) {++hidden;continue;}
+        ++visible;const auto before_effect=game.save_state();
+        const auto attached=cockpit.assemble(native,now,prefs);require(game.save_state()==before_effect);
+        require(native.packets[index].geometry.vertex_view().empty() && native.packets[index].geometry.line_view().empty());
+        const auto expected=cockpit_player_overlay_packet(source);
+        const auto actual=std::find_if(attached.begin()+2,attached.end(),[&](const auto& packet){
+            return same_draw_geometry(std::span(&packet,1),std::span(&expected,1)) && packet.model==expected.model;
+        });require(actual!=attached.end());
+        require(actual->geometry.vertex_view().size()==source.geometry.vertex_view().size()
+            && actual->geometry.line_view().size()==source.geometry.line_view().size());
+        for(bool follow:{false,true})for(unsigned scale:{0U,5U}) {
+            auto calibrated=prefs;calibrated.follow_ship_rotation=follow;calibrated.world_scale=scale;
+            calibrated.origin_x=16;calibrated.origin_y=4;calibrated.origin_z=-10;
+            const auto rig=presentation_instrument_matrix(*history.previous(),now,.5,calibrated);
+            const auto camera=multiply_matrix(rig,actual->model);
+            const auto native_camera=multiply_matrix(presentation_scene_matrix(*history.previous(),now,.5,calibrated),source.model);
+            const auto check_stream=[&](auto from,auto to) {for(size_t i=0;i<from.size();++i) {
+                const float pilot[]{from[i].position[0]/256,-from[i].position[1]/256,-from[i].position[2]/256};
+                const auto registered=point(camera,pilot),displayed=point(multiply_matrix(rig,expected.model),to[i].position);
+                const float unscaled[]{pilot[0]*calibrated.scale()-cockpit_seat_m[0],
+                    pilot[1]*calibrated.scale()-cockpit_seat_m[1],pilot[2]*calibrated.scale()-cockpit_seat_m[2]};
+                const auto authored=point(native_camera,from[i].position),attached_reference=point(rig,unscaled);
+                for(unsigned axis=0;axis<3;++axis) {
+                    near(registered[axis],displayed[axis]);
+                    require(std::abs(authored[axis]-attached_reference[axis])<.005F);
+                }
+                for(unsigned c=0;c<4;++c)near(from[i].color[c],to[i].color[c]);
+            }};
+            check_stream(source.geometry.vertex_view(),actual->geometry.vertex_view());
+            check_stream(source.geometry.line_view(),actual->geometry.line_view());
+            require(actual->model==cabin[2].model); // Same calibrated 12x ship/seat rig as the live nose.
+        }
+        if(!captured && !evidence.empty()) {
+            for(bool follow:{false,true}) {
+                auto view=prefs;view.follow_ship_rotation=follow;
+                dump(evidence+(follow?"-repair-follow.json":"-repair-existing-rotation.json"),attached,hud,
+                    presentation_instrument_matrix(*history.previous(),now,.5,view),
+                    presentation_scene_matrix(*history.previous(),now,.5,view),native.packets);
+            }
+            captured=true;
+        }
+    }
+    require(visible>0 && hidden>0);
+    std::cout<<(scene.meters.extended?"EX":"Original")<<" seeded native repair flash: "<<visible
+        <<" visible and "<<hidden<<" hidden phases, complete source geometry/materials and common ship-rig registration passed\n";
+    std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: 122 front + 84 rear + "
+        <<cabin[2].geometry.vertices.size()/3<<" clipped player triangles; source state/other objects/HUD art unchanged\n";
+}
+}
+int main(int argc,char** argv) try {
+    verify_rig();
+    if(argc>=3 && std::string_view(argv[1])=="--bundle") {
+        std::ifstream input(argv[2],std::ios::binary);std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)),{});require(bytes.size()>12);
+        uint32_t manifest=0;for(unsigned i=0;i<4;++i)manifest|=uint32_t(bytes[8+i])<<(8*i);
+        // Positive structure/CRC integration check; application validates its embedded manifest separately.
+        const auto bundle=assets::decode_runtime_bundle(bytes,manifest);
+        for(bool ex:{false,true})cartridge(assets::RomImage(ex?bundle.starfox_ex_rom:bundle.original_rom),
+            assets::SymbolMap::parse(ex?bundle.starfox_ex_symbols:bundle.original_symbols),argc==4?std::string(argv[3])+(ex?"-ex":"-original"):"");
+    } else if(argc==3)cartridge(assets::RomImage::load(argv[1]),assets::SymbolMap::load(argv[2]),"");
+    else require(argc==1);
+    std::cout<<"Cockpit geometry/clip/material/mount/calibration/follow/head-tracking checks passed\n";
+} catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

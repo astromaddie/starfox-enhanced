@@ -66,7 +66,7 @@ target_sources(starfox_vr_core PRIVATE src/vr/shape_batch.cpp src/render/face_ma
 target_compile_features(starfox_vr_core PUBLIC cxx_std_20)
 target_link_libraries(starfox_vr_core PUBLIC OpenXR::openxr_loader Vulkan::Headers PRIVATE ${CMAKE_DL_LIBS})
 add_library(starfox_vr_game STATIC src/vr/game_frame_driver.cpp src/vr/game_scene.cpp src/vr/draw_packet.cpp src/vr/vulkan_draw_packets.cpp src/vr/source_models.cpp)
-target_sources(starfox_vr_game PRIVATE src/vr/scene_interpolation.cpp)
+target_sources(starfox_vr_game PRIVATE src/vr/scene_interpolation.cpp src/vr/cockpit.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/source_span_model.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_bindings.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_model.cpp)
@@ -180,6 +180,8 @@ if(NOT ANDROID)
     endif()
     add_executable(starfox_vr_input_check tests/openxr_input_tests.cpp)
     target_link_libraries(starfox_vr_input_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_cockpit_geometry_check tests/vr_cockpit_geometry_tests.cpp)
+    target_link_libraries(starfox_vr_cockpit_geometry_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_cockpit_input_check tests/vr_cockpit_input_tests.cpp)
     target_link_libraries(starfox_vr_cockpit_input_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_game_input_check tests/vr_game_input_tests.cpp)
@@ -229,6 +231,11 @@ if(NOT ANDROID)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_vr_shader_freshness.py"
                 --cmake "${CMAKE_COMMAND}" --generator "${CMAKE_GENERATOR}")
         set_tests_properties(starfox_vr_shader_freshness PROPERTIES LABELS vr TIMEOUT 120)
+        add_test(NAME starfox_vr_cockpit_depth_check COMMAND starfox_vr_targets_check --cockpit-depth-only)
+        set_tests_properties(starfox_vr_cockpit_depth_check PROPERTIES LABELS vr TIMEOUT 10)
+        add_test(NAME starfox_vr_cockpit_assets
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_cockpit_assets.py" --check)
+        set_tests_properties(starfox_vr_cockpit_assets PROPERTIES LABELS vr TIMEOUT 10)
         add_test(NAME starfox_vr_ray_topology_check COMMAND starfox_vr_ray_topology_check)
         enable_testing()
         add_test(NAME starfox_vr_timestamp_math COMMAND starfox_vr_timestamp_check --math-only)
@@ -250,7 +257,7 @@ if(NOT ANDROID)
         foreach(vr_check IN ITEMS
             starfox_vr_application_tests starfox_vr_runtime_tests
             starfox_vr_audio_check starfox_vr_input_check
-            starfox_vr_packet_check starfox_vr_decal_check starfox_vr_cockpit_input_check starfox_vr_cache_check
+            starfox_vr_packet_check starfox_vr_decal_check starfox_vr_cockpit_input_check starfox_vr_cockpit_geometry_check starfox_vr_cache_check
             starfox_vr_session_check starfox_vr_swapchain_check
             starfox_vr_camera_check starfox_vr_device_check
             starfox_vr_targets_check starfox_vr_mesh_check)
@@ -270,6 +277,9 @@ if(NOT ANDROID)
                 add_test(NAME starfox_vr_decal_${vr_variant}
                     COMMAND starfox_vr_decal_check "${vr_test_rom}" "${vr_test_symbols}")
                 set_tests_properties(starfox_vr_decal_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 60)
+                add_test(NAME starfox_vr_cockpit_geometry_${vr_variant}
+                    COMMAND starfox_vr_cockpit_geometry_check "${vr_test_rom}" "${vr_test_symbols}")
+                set_tests_properties(starfox_vr_cockpit_geometry_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 120)
                 add_test(NAME starfox_vr_cockpit_input_${vr_variant}
                     COMMAND starfox_vr_cockpit_input_check "${vr_test_rom}" "${vr_test_symbols}")
                 set_tests_properties(starfox_vr_cockpit_input_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 120)
