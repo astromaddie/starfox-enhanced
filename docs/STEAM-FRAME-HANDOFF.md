@@ -592,3 +592,36 @@ visualization workspace: source input probes for Original/EX, `trajectory.cpp`,
 identical to isolate the camera; they do not simulate the new steering's
 changed gameplay path. No private ROMs, symbols or artwork enter Git or the
 package. No known hanging macOS Vulkan probes were retried.
+
+## Steering delivery and cockpit design review (October 1)
+
+Steering source `06f9065613db63dbfe16018912139ffa954c0d00` passed all four jobs
+in workflow `36863282913`: ARM64 packaging, Linux, Windows PCVR and Quest.
+Linux passed 22/22 CTests, including the required native Lavapipe timestamp
+query. Runtime artifact `11162918004` matches SHA-256
+`f35b7384f0e3d64a88c5f93f829b1dbf13b8797db0881b83b0045e0f038a2669`.
+The actual user bundle contains `C_TYPE` for Original and EX; production bundle
+decoding, symbol parsing, simulation and scene-history capture/tick succeeded
+for both. This positive symbol check does not independently replace embedded
+manifest compatibility checks.
+
+Official Devkit upload preserved all seven current private files and verified
+all ten runtime files against the package. The pre-upload checkpoint is
+`build/frame-devkit/checkpoints/preupload-06f9065-20261001T125432Z`; delivery
+evidence is under `build/frame-devkit/artifacts/06f9065`. The device reported
+SteamOS build `20260922.6101926`, gamescope and native ARM64 runtime settings.
+No game process remained before or after upload; no new launch was performed.
+The temporary next-launch arguments request `06f9065-profile.csv` in device
+XDG storage and 5,400 submitted stereo frames. Wearer/Valve recorder readiness
+is pending. Restore ordinary unlimited launch arguments after the capture.
+Neither actual 90 Hz delivery nor the reported roughness is accepted yet.
+
+The wearer selected open-canopy concept A, then rejected its prepared 3D asset
+package. Those assets are not approved and were not implemented. Revised
+private concepts compare newly shaped interior B with source COCKPIT geometry
+C, proposed materials and rear enclosure panels. Both display source HUD art
+and an authored nose, with a proposed larger ship presentation reference;
+physical fit and pose remain provisional. The source COCKPIT descriptor decodes
+to 83 vertices/66 faces; its intended live material state and native placement
+have not been established. Neither revised concept nor its final assets are
+approved. No cockpit geometry or extracted Nintendo assets entered Git.
