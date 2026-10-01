@@ -1,5 +1,6 @@
 #pragma once
 #include "starfox/vr/vulkan_eye_targets.hpp"
+#include <cstdint>
 #include <functional>
 #include <optional>
 namespace starfox::vr {

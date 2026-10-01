@@ -401,3 +401,8 @@ exception-path probes were run. The 90309 device check did not complete. The
 query result and unsupported-device path therefore remain a Linux CI gate.
 No profile CSV, Frame performance baseline, optimization, or performance
 acceptance is claimed yet.
+
+The first profiling workflow (`36850010195`, source `1e5fa21`) failed in the
+Linux compile because the timestamp command header used `std::uint32_t` and
+`std::uint64_t` without directly including `<cstdint>`. The follow-up adds that
+include; native query readback and all hosted checks still require the rerun.
