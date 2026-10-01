@@ -736,7 +736,7 @@ int main(int argc,char** argv) try {
             live_packets=layout_a_instrument_packets(rom,symbols,*history.current(),text);
             // Read back the exact submitted panel pixels, before its physical
             // quad placement. This is native GPU evidence, not a headset view.
-            const auto panel=panel_matrix();Matrix4 inverse=identity_matrix;
+            const auto panel=overlay_panel_matrix();Matrix4 inverse=identity_matrix;
             inverse[0]=1/panel[0];inverse[5]=1/panel[5];
             inverse[12]=-panel[12]/panel[0];inverse[13]=-panel[13]/panel[5];inverse[14]=-panel[14];
             for(auto& packet:live_packets) packet.model=multiply_matrix(inverse,packet.model);

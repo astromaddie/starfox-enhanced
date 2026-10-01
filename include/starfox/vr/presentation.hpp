@@ -22,11 +22,21 @@ inline Matrix4 multiply_matrix(const Matrix4& a,const Matrix4& b) noexcept {
         for(unsigned k=0;k<4;++k) out[c*4+r]+=a[k*4+r]*b[c*4+k];
     return out;
 }
+inline constexpr float interface_panel_distance=1.75F;
+inline constexpr float interface_panel_width=1.15F;
+// Initial comfort value, pending wearer calibration. Keep the original angular size.
+inline constexpr float overlay_panel_distance=.75F;
+inline constexpr float panel_width_at(float distance) noexcept {
+    return interface_panel_width*distance/interface_panel_distance;
+}
 // Independent physical width/distance. Do not reuse source_layer_matrix:
 // its perspective-sized plane is authoritative for source aiming.
-inline Matrix4 panel_matrix(float width=1.15F,float distance=1.75F) noexcept {
+inline Matrix4 panel_matrix(float width=interface_panel_width,float distance=interface_panel_distance) noexcept {
     const float s=width/256.F;
     return {s,0,0,0,0,-s,0,0,0,0,1,0,-128*s,112*s,-distance,1};
+}
+inline Matrix4 overlay_panel_matrix() noexcept {
+    return panel_matrix(panel_width_at(overlay_panel_distance),overlay_panel_distance);
 }
 inline EyeCamera panel_raster_camera() noexcept {
     EyeCamera out;out.view=identity_matrix;
@@ -37,7 +47,9 @@ inline EyeCamera panel_raster_camera() noexcept {
 class WorldPanelAnchor {
 public:
     void reset() noexcept {pose_.reset();}
-    XrPosef pose(const std::array<XrView,2>& views,float distance=1.75F) noexcept {
+    XrPosef pose(const std::array<XrView,2>& views,float distance=interface_panel_distance) noexcept {
+        // A family transition must not retain the previous far/near anchor.
+        if(distance!=distance_) {pose_.reset();distance_=distance;}
         if(!pose_) {
             const auto& q=views[0].pose.orientation;
             const float yaw=std::atan2(2*(q.w*q.y+q.x*q.z),1-2*(q.y*q.y+q.x*q.x));
@@ -49,6 +61,6 @@ public:
         }
         return *pose_;
     }
-private:std::optional<XrPosef> pose_;
+private:std::optional<XrPosef> pose_;float distance_{};
 };
 }

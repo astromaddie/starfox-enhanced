@@ -48,9 +48,9 @@ std::vector<DrawPacket> layout_a_instrument_packets(const assets::RomImage& rom,
     // Source portraits, glyph shadows and meters provide their own framing.
     // Leave unoccupied gameplay HUD pixels open to the world.
     auto oam=source_sprite_packet(*scene.ppu,scene.display_brightness,{},srgb,&scene.meters,&layout,SourceSpritePass::hud);
-    oam.model=panel_matrix();packets.push_back(std::move(oam));
+    oam.model=overlay_panel_matrix();packets.push_back(std::move(oam));
     auto meters=source_meter_packet(scene.meters,scene.ppu->cgram,scene.display_brightness,srgb,256,false,&layout);
-    meters.model=panel_matrix();
+    meters.model=overlay_panel_matrix();
     // Inner FX meter origin is (16,16) in the full PPU canvas. Offsets above
     // move each group identically after that authored composition.
     meters.model[12]+=16*meters.model[0];meters.model[13]+=16*meters.model[5];
@@ -58,7 +58,7 @@ std::vector<DrawPacket> layout_a_instrument_packets(const assets::RomImage& rom,
     if(replace_native_dialogue(scene)) {
         auto dialogue=source_dialogue_packets(rom,symbols,scene.dialogue,text,scene.ppu->cgram,scene.display_brightness,srgb);
         for(auto& packet:dialogue) {
-            packet.model=panel_matrix();
+            packet.model=overlay_panel_matrix();
             packet.model[12]+=layout[render::HudElement::comms].x*packet.model[0];
             packet.model[13]+=layout[render::HudElement::comms].y*packet.model[5];
             packets.push_back(std::move(packet));

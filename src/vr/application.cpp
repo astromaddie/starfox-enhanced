@@ -1482,7 +1482,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 if(source_panel && !live->history->current()->paused && !startup.open) {
                     const auto snapshot=live->history->current();
                     const bool srgb=swapchains.format()==VK_FORMAT_R8G8B8A8_SRGB || swapchains.format()==VK_FORMAT_B8G8R8A8_SRGB;
-                    const auto colour=source_backdrop_colour(snapshot->ppu->cgram[0],snapshot->display_brightness,srgb);
+                    const bool controls=snapshot->flow==simulation::GameFlowState::controls_type
+                        || snapshot->flow==simulation::GameFlowState::controls_choice;
+                    const auto colour=controls?source_menu_background_colour(*snapshot->ppu,snapshot->display_brightness,srgb)
+                        :source_backdrop_colour(snapshot->ppu->cgram[0],snapshot->display_brightness,srgb);
                     std::copy(colour.begin(),colour.end(),clear.float32);
                 }
                 const auto ui_camera=startup.open?panel_raster_camera():source_panel_camera(*live->history->current());
@@ -1502,7 +1505,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     });
                 if(result!=StereoRenderer::EyeResult::complete) return result;
                 if(!ui_images.release()) return StereoRenderer::EyeResult::failed;
-                const auto* quad=ui_images.layer(session.space(),ui_anchor.pose(frame.views));
+                const bool overlay=startup.open?startup.runtime:live->history->current()->paused;
+                const float distance=overlay?overlay_panel_distance:interface_panel_distance;
+                const auto* quad=ui_images.layer(session.space(),ui_anchor.pose(frame.views,distance),panel_width_at(distance));
                 if(!quad) return StereoRenderer::EyeResult::failed;
                 layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(quad));
                 return StereoRenderer::EyeResult::complete;

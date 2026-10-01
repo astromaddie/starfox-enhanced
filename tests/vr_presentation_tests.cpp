@@ -177,6 +177,36 @@ int main() try {
         require(!layout_a_surface(true).geometry.vertex_view().empty(),
             "Separate menu panel was removed with gameplay backing");
     }
+    {
+        using Flow=starfox::simulation::GameFlowState;
+        GameSceneSnapshot scene;
+        for(auto flow:{Flow::title,Flow::controls_type,Flow::controls_choice,Flow::planet_select,
+            Flow::planet_travel,Flow::ex_pregame_menu}) {
+            scene.flow=flow;require(world_panel_scene(scene),"Authored interface escaped whole-scene quad");
+        }
+        for(auto flow:{Flow::gameplay,Flow::training,Flow::intro}) {
+            scene.flow=flow;require(!world_panel_scene(scene),"Live scene was flattened with menus");
+        }
+        scene.paused=true;require(world_panel_scene(scene),"Pause lost interface quad");
+        scene.paused=false;scene.briefing.active=true;
+        require(world_panel_scene(scene),"Briefing lost interface quad");
+        const auto far=panel_matrix(),near=overlay_panel_matrix();
+        require(std::abs(near[14]+.75F)<1e-6F && std::abs(far[14]+1.75F)<1e-6F,"Interface depths changed");
+        for(unsigned i:{0U,5U,12U,13U})
+            require(std::abs(near[i]/near[14]-far[i]/far[14])<1e-6F,"Near overlay changed angular layout");
+        require(source_ui_layer_matrix(112,96,false)->at(14)==-2.F,"Source aiming plane moved");
+        std::array<XrView,2> views{};for(auto& view:views)view.pose.orientation.w=1;
+        views[0].pose.position.x=-.032F;views[1].pose.position.x=.032F;
+        WorldPanelAnchor anchor;
+        require(anchor.pose(views).position.z==-1.75F,"Initial menu depth wrong");
+        for(auto& view:views)view.pose.position.z=1;
+        require(anchor.pose(views).position.z==-1.75F,"Stable menu followed head translation");
+        require(anchor.pose(views,.75F).position.z==.25F,"Near family retained far anchor");
+        for(auto& view:views)view.pose.position.z=2;
+        require(anchor.pose(views,.75F).position.z==.25F,"Stable overlay followed head translation");
+        for(auto& view:views)view.pose.position.z=3;
+        require(anchor.pose(views,1.75F).position.z==1.25F,"Far family retained near anchor");
+    }
     OpenXrSession session(api());start(session);
     OpenXrSwapchains chains({formats,swap_create,swap_destroy,images,acquire,image_wait,release});
     std::array<XrViewConfigurationView,2> config{};

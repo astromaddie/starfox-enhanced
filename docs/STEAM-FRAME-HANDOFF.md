@@ -290,12 +290,63 @@ the corrected gameplay HUD remains pending the next immutable Frame build,
 which must retain the committed `7a47bd4` rumble/default-preference work.
 No new headset, performance, or 90 Hz acceptance is claimed.
 
-A separate wearer report describes ships appearing closer than text that covers
-them. The wearer identifies the startup splash, controls adjustment, gameplay
-pause, and in-game dialogue. Pause/host quads are composed
-after the stereo projection without shared world depth, at a 1.75 m anchor;
-gameplay HUD packets also draw after models with depth disabled. Either can
-create conflicting stereo depth and visual occlusion for nearer geometry.
-Non-paused map/briefing/pregame panels instead suppress the eye world and draw
-the whole authored scene into one flat quad. This trace is a hypothesis boundary,
-not a reproduced defect or a depth-policy change in the backing correction.
+The immutable `68cda35` package subsequently passed all four hosted CI jobs,
+was uploaded with all ten public package hashes and seven private-file hashes
+verified, and launched through the official Devkit client. XR reached
+`FOCUSED` with two 2016x2016 views and successful Frame binding loads. Its
+capture shows the VR presentation settings panel; the gameplay HUD and
+authored haptics still await wearer confirmation. Runtime logs mention the
+90 Hz preference, which does not establish actual refresh or performance.
+The preserved v6 settings have existing camera, 1x world/head translation,
+and zero cockpit offsets. Evidence is in `/tmp/starfox-frame-run-68cda35`
+and `/tmp/starfox-frame-device-evidence.json`.
+
+## Interface stereo-depth correction (68cda35 base)
+
+The wearer identified source startup splash, controls, gameplay pause, and
+in-game dialogue as having ships appear closer than artwork covering them.
+Controlled Original renders confirm a stereo-distance versus draw-order
+conflict. Title ships span 0.719–1.439 m against 2 m artwork; controls ships
+span 0.832–1.223 m against 2 m artwork. Including the existing runtime's 0.25 m
+model offset, the first Corneria player spans 0.875–1.344 m against the prior
+1.75 m HUD, and the paused player spans 0.867–1.336 m. These corrected gameplay
+numbers supersede the initial `depth-investigation` diagnostic that omitted
+that host offset; title/controls measurements were unaffected.
+
+Title/splash and both source controls states now use the existing whole-scene
+interface quad at 1.75 m, width 1.15 m. Their animated menu-preview models and
+source artwork share a single raster depth. This deliberately makes those menu
+previews flat; gameplay world geometry remains stereoscopic. Compact gameplay
+HUD/dialogue and pause/runtime host overlays use a separate initial 0.75 m
+distance, width 1.15 * 0.75 / 1.75 m, retaining their previous angular size and
+source component positions. Initial startup/map/briefing panels retain 1.75 m.
+The anchor recaptures when the panel distance changes; ordinary head motion
+within the same family does not move the retained world anchor. Source aiming
+sprites/reticles/warnings retain their original 2 m placement. Camera/world
+scale, pilot calibration, raw runtime eye views, v6 preferences, input and
+rumble behavior are unchanged. The 0.75 m value is not comfort-calibrated.
+
+Private evidence is in `frame-ui/depth-correction`: paired two-eye native
+Vulkan readbacks for title, controls, dialogue and pause, plus active pilot
+views. They use actual Original simulation states, production packet assembly,
+EyeCamera and source rasterization. The whole-interface raster is reprojected
+through textured packets to model its submitted quad geometry; this is not a
+live compositor or headset capture. Legacy completed-tick geometry is used,
+with actual host model offset/pilot transforms; ancillary sky is omitted and
+native clear colour retained. Original pause is a frozen world/HUD fixture,
+not EX pause-text coverage. Six before/after comparison boards were inspected.
+
+Default-camera samples at ticks 362/382/442 put the player nearest vertices at
+0.875/0.809/0.816 m; sampled active-pilot visible models are at least 1.504 m
+away. One other model at tick 442 reaches 0.677 m below the HUD, after dialogue
+has ended. Therefore the new distance addresses the reported player/interface
+case, not every possible enemy, shadow, head movement or clipping case. It is
+not a universal foreground-occlusion guarantee. No tighter depth was introduced.
+
+The PCVR, native scene-check, presentation, input and camera targets build;
+focused presentation/input/camera checks pass. Regressions cover interface
+classification, angular-size invariance, unchanged source aiming plane and
+far-to-near/near-to-far anchor transitions. The native HUD specimen checker
+undoes the new overlay transform to preserve its exact source-pixel readback.
+Hardware compositor appearance, comfort/readability at 0.75 m, and actual
+wearer default/pilot acceptance remain pending. No performance claim is made.

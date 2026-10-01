@@ -87,7 +87,12 @@ inline bool pilot_view_active(const GameSceneSnapshot& scene,const PresentationP
         && (scene.flow==simulation::GameFlowState::gameplay || scene.flow==simulation::GameFlowState::training);
 }
 inline bool world_panel_scene(const GameSceneSnapshot& scene) noexcept {
+    // Complete authored interface scenes share one raster/quad, including their
+    // menu-preview models. Gameplay world geometry remains stereoscopic.
     return scene.paused || scene.briefing.active
+        || scene.flow==simulation::GameFlowState::title
+        || scene.flow==simulation::GameFlowState::controls_type
+        || scene.flow==simulation::GameFlowState::controls_choice
         || scene.flow==simulation::GameFlowState::planet_select
         || scene.flow==simulation::GameFlowState::planet_travel
         || scene.flow==simulation::GameFlowState::ex_pregame_menu;
