@@ -73,9 +73,15 @@ common_cmake_args=(
     -DSTARFOX_BUILD_TOOLS=OFF
     -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
 )
+cmake_debug_args=()
+if [[ "${STARFOX_CMAKE_DEBUG_TRY_COMPILE:-}" == "1" ]]; then
+    # CI failure artifacts retain the generated probe project and command files
+    # when a cross-platform compiler check fails.
+    cmake_debug_args+=(--debug-trycompile)
+fi
 
 flat_build="${build_root}/flat"
-cmake -S "${source_root}" -B "${flat_build}" \
+cmake "${cmake_debug_args[@]}" -S "${source_root}" -B "${flat_build}" \
     "${common_cmake_args[@]}" \
     -DSTARFOX_BUILD_RUNTIME=ON \
     -DSTARFOX_BUILD_VR=OFF \
@@ -83,7 +89,7 @@ cmake -S "${source_root}" -B "${flat_build}" \
 cmake --build "${flat_build}" --target starfox_pc --parallel "${jobs}"
 
 vr_build="${build_root}/steam-frame-vr"
-cmake -S "${source_root}" -B "${vr_build}" \
+cmake "${cmake_debug_args[@]}" -S "${source_root}" -B "${vr_build}" \
     "${common_cmake_args[@]}" \
     -DSTARFOX_BUILD_RUNTIME=OFF \
     -DSTARFOX_BUILD_VR=ON \

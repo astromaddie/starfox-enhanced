@@ -54,11 +54,29 @@ jobs:
             clang lld llvm cmake ninja-build python3 curl tar coreutils \
             binutils pkg-config
       - name: Cross-build and validate clean Frame package
+        env:
+          STARFOX_CMAKE_DEBUG_TRY_COMPILE: "1"
         run: |
           chmod +x tools/build_steam_frame.sh tools/package/LAUNCH-STEAM-FRAME.sh
           tools/build_steam_frame.sh . \
             "$RUNNER_TEMP/starfox-steam-frame-build" \
             "$RUNNER_TEMP/starfox-steam-frame-package"
+      - name: Preserve cross-build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-steam-frame-configure-failure
+          path: |
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeCache.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeError.log
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeScratch/
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeCache.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeError.log
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeScratch/
+          if-no-files-found: warn
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: StarFoxEnhanced-steam-frame-arm64
@@ -117,5 +135,3 @@ jobs:
           tools/build_android.sh "$GITHUB_WORKSPACE" debug quest
           python3 tools/check_quest_package.py dist/StarFoxEnhanced-quest-arm64.apk \
             --source-root "$GITHUB_WORKSPACE"
-          unzip -l dist/StarFoxEnhanced-quest-arm64.apk | grep -q 'lib/arm64-v8a/libmain.so'
-          unzip -l dist/StarFoxEnhanced-quest-arm64.apk | grep -q 'lib/arm64-v8a/libSDL3.so'
