@@ -11,11 +11,13 @@
 namespace starfox::vr {
 class StartupMenu {
 public:
-    enum class Page { main,options,cheats,three_d,two_d,presentation,exit_confirmation };
+    enum class Page { main,options,cheats,three_d,two_d,presentation,exit_confirmation,reset_confirmation };
     Page page{Page::main};
     PresentationPreferences presentation;
     unsigned recenter_revision{};
     bool exit_requested{};
+    // One-shot, consumed by the application: rebuild at INTROMAP, keep saves.
+    bool reset_requested{};
     bool open{true},god_mode{},extended{},alternate_available{},runtime{};
     bool infinite_bombs{},infinite_boost{},infinite_lives{},swap_face_buttons{};
     bool unlocked_pace{true};
@@ -95,7 +97,20 @@ public:
         model_intensity=bytes[4]>=4?bytes[18]:100;world_intensity=bytes[4]>=4?bytes[19]:100;
         return true;
     }
-    unsigned row_count() const noexcept {return page==Page::presentation?9:page==Page::exit_confirmation?2:page==Page::main?6:page==Page::options?11:page==Page::three_d?(ray_tracing_available?5:4):page==Page::two_d?5:7;}
+    unsigned row_count() const noexcept {
+        switch(page) {
+        case Page::presentation: return 9;
+        case Page::exit_confirmation: case Page::reset_confirmation: return 2;
+        case Page::main: return runtime?7:6; // RESET GAME only mid-game
+        case Page::options: return 11;
+        case Page::three_d: return ray_tracing_available?5:4;
+        case Page::two_d: return 5;
+        default: return 7;
+        }
+    }
+    // Main page rows: 0..3 settings, 4 RESUME/START GAME, [5 RESET GAME], last QUIT TO STEAM.
+    unsigned reset_row() const noexcept {return 5;}
+    unsigned quit_row() const noexcept {return runtime?6:5;}
     unsigned first_visible_row() const noexcept {return selection<6?0:selection-5;}
     VrControls gameplay_controls(VrControls controls) const noexcept {
         // Native mapping is Y=fire, X=boost, A=bomb, B=brake.
@@ -126,7 +141,8 @@ public:
         case Page::three_d: page=Page::options;selection=6;break;
         case Page::two_d: page=Page::options;selection=7;break;
         case Page::presentation: page=Page::options;selection=9;break;
-        case Page::exit_confirmation: page=Page::main;selection=5;break;
+        case Page::exit_confirmation: page=Page::main;selection=quit_row();break;
+        case Page::reset_confirmation: page=Page::main;selection=reset_row();break;
         }
         ++revision;
     }
@@ -152,7 +168,8 @@ public:
                 else if(selection==2 && msu_available) msu_music=!msu_music;
                 else if(selection==3) {page=Page::options;selection=0;}
                 else if(selection==4) open=false;
-                else if(selection==5) {page=Page::exit_confirmation;selection=0;}
+                else if(runtime && selection==reset_row()) {page=Page::reset_confirmation;selection=0;}
+                else if(selection==quit_row()) {page=Page::exit_confirmation;selection=0;}
             } else if(page==Page::options) {
                 if(selection==0) {page=Page::cheats;selection=0;}
                 else if(selection==1) crosshair_colour=(crosshair_colour+1)%8;
@@ -167,7 +184,10 @@ public:
                 else {page=Page::main;selection=3;}
             } else if(page==Page::exit_confirmation) {
                 if(selection==1) exit_requested=true;
-                else {page=Page::main;selection=5;}
+                else {page=Page::main;selection=quit_row();}
+            } else if(page==Page::reset_confirmation) {
+                if(selection==1) reset_requested=true;
+                else {page=Page::main;selection=reset_row();}
             } else if(page==Page::presentation) {
                 if(selection==0) presentation.cockpit=!presentation.cockpit;
                 else if(selection==1) presentation.follow_ship_rotation=!presentation.follow_ship_rotation;
@@ -213,9 +233,10 @@ public:
             back_armed_=false;back();
         }
     }
-    std::string title() const {return page==Page::exit_confirmation?"QUIT TO STEAM?":page==Page::presentation?"VR PRESENTATION":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
+    std::string title() const {return page==Page::exit_confirmation?"QUIT TO STEAM?":page==Page::reset_confirmation?"RESET GAME?":page==Page::presentation?"VR PRESENTATION":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
     std::vector<std::string> labels() const {
         if(page==Page::exit_confirmation) return {"NO / BACK","YES / QUIT TO STEAM"};
+        if(page==Page::reset_confirmation) return {"NO / BACK","YES / RESET GAME"};
         if(page==Page::presentation) return {
             std::string("CAMERA: ")+(presentation.cockpit?"COCKPIT":"EXISTING"),
             std::string("FOLLOW SHIP ROTATION: ")+(presentation.follow_ship_rotation?"ON":"OFF"),
@@ -252,6 +273,7 @@ public:
             std::string("PACE/SPEED: ")+(unlocked_pace?"UNLOCKED 20 HZ":"ORIGINAL"),
             std::string("MSU-1 MUSIC: ")+(msu_available?(msu_music?"ON":"OFF"):"NOT FOUND"),
             "OPTIONS",runtime?"RESUME":"START GAME"};
+        if(runtime) rows.push_back("RESET GAME");
         rows.push_back("QUIT TO STEAM");
         return rows;
     }

@@ -33,7 +33,8 @@ OPTIONS > VR PRESENTATION selects the existing camera
 cockpit XYZ origin calibration, and RECENTER. Head translation preserves IPD.
 Hold View for 1 second to recentre (keeps your height); hold 3 seconds to
 recentre and recalibrate height. Both buzz both controllers.
-QUIT TO STEAM, then YES / QUIT TO STEAM, ends the session and exits;
+RESET GAME (runtime menu, with a confirm) restarts at the start menu and keeps
+saves. QUIT TO STEAM, then YES / QUIT TO STEAM, ends the session and exits;
 NO / BACK returns.
 
 No ROM, generated BIN, private music, saves, or keys are included or should be

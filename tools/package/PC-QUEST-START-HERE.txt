@@ -26,9 +26,11 @@ VR SETUP AND RESET
 PREVIEW: OFF/ON appears on the main, 2D and 3D setup pages (default Off).
 Startup previews a separate silent Corneria checkpoint; in-game options show
 your frozen scene. Changes to model/world effects are visible immediately.
-Hold both triggers, then click both thumbsticks to reset to startup. This
-discards the current unsaved session, not saved data. Release the sticks before
-trying again; holding the chord will not repeatedly reset the app.
+Open the in-game menu with both grips held for half a second (Menu + Select),
+then choose RESET GAME and confirm to return to the start menu. This
+discards the current unsaved session, not saved data. The old trigger plus
+thumbstick-click reset chord was removed; those inputs are normal game controls.
+B goes back in every menu page.
 
 PC SHORTCUTS
 F1: in-game options (experience stays locked).

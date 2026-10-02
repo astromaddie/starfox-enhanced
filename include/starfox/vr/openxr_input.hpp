@@ -30,7 +30,7 @@ struct VrControls {
     // `select` / `select_pressed` are the L View *short press*: a one-poll tap
     // reported on release (see SystemLayer). `view_down` is the raw level.
     bool select{},select_pressed{},view_down{};
-    bool stick_left{},stick_right{},reset_pressed{};
+    bool stick_left{},stick_right{};
     // System layer one-shots (standard section 1). The recentre events are
     // applied by the application at the next stereo frame boundary;
     // recentre_height_pressed also recalibrates standing height.
@@ -74,10 +74,7 @@ public:
     [[nodiscard]] VrControls sample(VrControls controls,
         double now=SystemLayer::steady_seconds()) noexcept {
         controls.menu_pressed=controls.menu&&!menu_;
-        const bool reset=controls.roll_left&&controls.roll_right
-            &&controls.stick_left&&controls.stick_right;
-        controls.reset_pressed=reset&&!reset_;
-        menu_=controls.menu;reset_=reset;
+        menu_=controls.menu;
         const bool view=controls.select;
         const auto events=system_.update(view,controls.menu,now);
         controls.view_down=view;
@@ -87,9 +84,9 @@ public:
         controls.menu_chord_pressed=events.open_menu;
         return controls;
     }
-    void reset() noexcept {menu_=reset_=false;system_.reset();}
+    void reset() noexcept {menu_=false;system_.reset();}
 private:
-    bool menu_{},reset_{};
+    bool menu_{};
     SystemLayer system_;
 };
 
@@ -127,7 +124,7 @@ private:
     void pulse_system() noexcept;
     VrControls controls_{};bool menu_armed_{};
     SystemLayer system_;
-    bool reset_armed_{},focused_{};
+    bool focused_{};
     std::string status_;
 };
 }

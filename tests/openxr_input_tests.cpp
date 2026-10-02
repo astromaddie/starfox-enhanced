@@ -212,7 +212,7 @@ int main() try {
         menu.sample({},true);menu.sample(up,true);require(menu.selection==8);
         for(unsigned language=0;language<6;++language) {
             menu.language=language;
-            for(const auto page:{Page::main,Page::options,Page::cheats,Page::three_d,Page::two_d}) {
+            for(const auto page:{Page::main,Page::options,Page::cheats,Page::three_d,Page::two_d,Page::presentation,Page::exit_confirmation,Page::reset_confirmation}) {
                 menu.page=page;
                 require(menu.localized_labels().size()==menu.row_count());
                 for(const auto& label:menu.localized_labels()) require(!label.empty());
@@ -344,15 +344,19 @@ int main() try {
     require(!input.poll(true));require(input.initialize(handle<XrInstance>(1),handle<XrSession>(2)));
     require(created==18 && suggestions==3);
     independent_buttons=true;
-    require(input.poll(true) && !input.controls().reset_pressed);
+    // The old four-input reset chord (both bumpers + both stick clicks) is
+    // gone: those inputs stay plain game actions and trigger no system work.
     button_states[12]=button_states[13]=true;
-    require(input.poll(true) && !input.controls().reset_pressed);
+    require(input.poll(true));
     button_states[7]=button_states[8]=true;
-    require(input.poll(true) && !input.controls().reset_pressed); // Sticks first is not the chord.
-    button_states[12]=button_states[13]=false;require(input.poll(true));
-    button_states[12]=true;require(input.poll(true) && !input.controls().reset_pressed);
-    button_states[13]=true;require(input.poll(true) && input.controls().reset_pressed);
-    require(input.poll(true) && !input.controls().reset_pressed); // Never repeat while held.
+    for(const double at:{0.0,.2,.7,1.5,4.0}) {
+        require(input.poll(true,200.0+at));
+        const auto& chord=input.controls();
+        require(chord.roll_left && chord.roll_right && chord.stick_left && chord.stick_right);
+        require(!chord.menu_pressed && !chord.select && !chord.select_pressed && !chord.view_down
+            && !chord.recentre_pressed && !chord.recentre_height_pressed && !chord.menu_chord_pressed);
+    }
+    button_states[12]=button_states[13]=button_states[7]=button_states[8]=false;require(input.poll(true));
     button_states[14]=true;
     require(input.poll(true) && input.controls().steer.y>0.99F);
     button_states[14]=false;button_states[15]=true;
@@ -360,7 +364,7 @@ int main() try {
     button_states[15]=false;button_states[16]=button_states[17]=true;
     require(input.poll(true) && input.controls().steer.x==0.0F);
     button_states[16]=button_states[17]=false;
-    require(input.poll(false));require(input.poll(true) && !input.controls().reset_pressed);
+    require(input.poll(false));require(input.poll(true));
     independent_buttons=false;
     require(input.poll(false)); // Start the existing focus tests with unarmed buttons.
     require(input.aim_poses(handle<XrSpace>(2),1)[0].has_value());
@@ -486,17 +490,55 @@ int main() try {
             |bit(VrControlAction::stick_left)|bit(VrControlAction::stick_right);
         held.menu=held.select=held.roll_left=held.roll_right=true;
         held.stick_left=held.stick_right=true;
-        auto edge=edges.sample(held);
-        require(edge.menu_pressed && !edge.select_pressed && edge.reset_pressed);
-        static_cast<void>(edges.sample(held)); // Held while unfocused; discard this sample.
-        edge=edges.sample(held); // Same level after focus resume is not a new press.
-        require(!edge.menu_pressed && !edge.select_pressed && !edge.reset_pressed);
+        auto edge=edges.sample(held,50.0);
+        require(edge.menu_pressed && !edge.select_pressed && edge.view_down && !edge.menu_chord_pressed);
+        // Held since before arming (e.g. through focus resume): never a hold.
+        edge=edges.sample(held,60.0);
+        require(!edge.menu_pressed && !edge.select_pressed && !edge.recentre_pressed
+            && !edge.menu_chord_pressed);
         selected=select_vr_control_sources({},edge);
-        require(selected.menu && !selected.menu_pressed
-            && !selected.select && selected.view_down && !selected.select_pressed && !selected.reset_pressed);
-        static_cast<void>(edges.sample({}));
-        edge=edges.sample(held);
-        require(edge.menu_pressed && !edge.select_pressed && edge.reset_pressed);
+        require(selected.menu && !selected.menu_pressed && !selected.select
+            && selected.view_down && !selected.menu_chord_pressed);
+        static_cast<void>(edges.sample({},61.0));
+        // Menu + View held 0.5 s opens the runtime menu, once, with no Select.
+        edge=edges.sample(held,70.0);
+        require(edge.menu_pressed && !edge.menu_chord_pressed && !edge.select_pressed);
+        require(!edges.sample(held,70.49).menu_chord_pressed);
+        edge=edges.sample(held,70.5);
+        require(edge.menu_chord_pressed && !edge.recentre_pressed
+            && select_vr_control_sources({},edge).menu_chord_pressed);
+        require(!edges.sample(held,70.6).menu_chord_pressed);
+        edge=edges.sample({},75.0);
+        require(!edge.select_pressed && !edge.recentre_pressed); // Chord View never taps.
+        // L View alone: short press is a tap on release; holds recentre.
+        VrControls view_only;view_only.active_actions=bit(VrControlAction::select);view_only.select=true;
+        require(!edges.sample(view_only,80.0).select_pressed);
+        VrControls idle;idle.active_actions=bit(VrControlAction::select);
+        edge=edges.sample(idle,80.3);
+        require(edge.select_pressed && edge.select && !edge.recentre_pressed
+            && select_vr_control_sources({},edge).select_pressed);
+        require(!edges.sample({},80.4).select);
+        static_cast<void>(edges.sample(view_only,90.0));
+        edge=edges.sample(view_only,90.99);
+        require(!edge.recentre_pressed && !edge.select);
+        edge=edges.sample(view_only,91.0);
+        require(edge.recentre_pressed && !edge.recentre_height_pressed && !edge.select);
+        require(!edges.sample(view_only,92.5).recentre_pressed);
+        edge=edges.sample(view_only,93.0);
+        require(edge.recentre_pressed && edge.recentre_height_pressed
+            && select_vr_control_sources({},edge).recentre_height_pressed);
+        edge=edges.sample({},93.1);
+        require(!edge.select_pressed && !edge.recentre_pressed); // A hold is not also a tap.
+        // Both bumpers + both stick clicks are ordinary game inputs again.
+        VrControls four;four.roll_left=four.roll_right=four.stick_left=four.stick_right=true;
+        four.active_actions=bit(VrControlAction::roll_left)|bit(VrControlAction::roll_right)
+            |bit(VrControlAction::stick_left)|bit(VrControlAction::stick_right);
+        for(const double at:{100.0,100.1,103.0,106.0}) {
+            edge=edges.sample(four,at);
+            require(edge.roll_left && edge.roll_right && edge.stick_left && edge.stick_right
+                && !edge.menu_pressed && !edge.select_pressed && !edge.recentre_pressed
+                && !edge.menu_chord_pressed);
+        }
     }
     VrGameInput game_input;VrControls controls;
     controls.fire=true;controls.bomb=true;controls.boost=true;controls.brake=true;

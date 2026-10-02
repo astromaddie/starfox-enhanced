@@ -842,7 +842,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 if(live) try {
                     const auto profile_start=std::chrono::steady_clock::now();
                     const bool focused=input_focused;
-                    if(focused && controls.reset_pressed) {
+                    if(startup.reset_requested) {
+                      startup.reset_requested=false;
+                      if(focused) {
                         sandbox.cancel();
                         auto restarted=bundle?std::make_unique<LiveGame>(
                             starfox::assets::RomImage(initial_extended?bundle->starfox_ex_rom:bundle->original_rom),
@@ -858,6 +860,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         startup.preview=false;startup.page=StartupMenu::Page::main;startup.selection=0;
                         startup.selected_level=0;++startup.revision;startup_release=true;
                         sprite_revision.reset();uploaded_backgrounds.clear();uploaded_sprites.clear();
+                      }
                     }
                     // Menu + View held 0.5 s (SystemLayer) opens this port's own
                     // runtime menu, which is its VR settings; it never leaves the app.

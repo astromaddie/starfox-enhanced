@@ -68,14 +68,7 @@ VrControls select_vr_control_sources(
     set_bool(VrControlAction::stick_left, &VrControls::stick_left);
     set_bool(VrControlAction::stick_right, &VrControls::stick_right);
 
-    constexpr auto reset_chord = vr_control_bit(VrControlAction::roll_left)
-        | vr_control_bit(VrControlAction::roll_right)
-        | vr_control_bit(VrControlAction::stick_left)
-        | vr_control_bit(VrControlAction::stick_right);
-    if ((openxr.active_actions & reset_chord) == reset_chord)
-        selected.reset_pressed = openxr.reset_pressed;
-    else if ((desktop.active_actions & reset_chord) == reset_chord)
-        selected.reset_pressed = desktop.reset_pressed;
+    // Stick clicks and bumpers stay game actions: there is no input chord.
     selected.view_down = openxr.view_down || desktop.view_down;
     selected.recentre_pressed = openxr.recentre_pressed || desktop.recentre_pressed;
     selected.recentre_height_pressed =
@@ -175,7 +168,7 @@ void OpenXrInput::close() noexcept {
     haptic_started_hands_ = {};
     haptic_profile_count_ = 0U;
     controls_ = {};
-    menu_armed_ = reset_armed_ = false;
+    menu_armed_ = false;
     system_.reset();
     focused_ = false;
 }
@@ -352,7 +345,7 @@ bool OpenXrInput::poll(bool focused, double now) {
     if (!focused) {
         stop_haptics();
         controls_ = {};
-        menu_armed_ = reset_armed_ = false;system_.reset();
+        menu_armed_ = false;system_.reset();
         focused_ = false;
         return true;
     }
@@ -361,7 +354,7 @@ bool OpenXrInput::poll(bool focused, double now) {
         const auto fail_poll = [&](XrResult result, const char* operation) {
             stop_haptics();
             controls_ = {};
-            menu_armed_ = reset_armed_ = false;system_.reset();
+            menu_armed_ = false;system_.reset();
             focused_ = false;
             status_ = std::string(operation) + ": " + std::to_string(result);
             return false;
@@ -374,7 +367,7 @@ bool OpenXrInput::poll(bool focused, double now) {
         if (sync_result == XR_SESSION_NOT_FOCUSED) {
             stop_haptics();
             controls_ = {};
-            menu_armed_ = reset_armed_ = false;system_.reset();
+            menu_armed_ = false;system_.reset();
             focused_ = false;
             return true;
         }
@@ -505,12 +498,6 @@ bool OpenXrInput::poll(bool focused, double now) {
             next.steer = {x * scale, y * scale};
         }
 
-        const bool triggers = next.roll_left && next.roll_right;
-        const bool sticks_active = stick_left_active && stick_right_active;
-        next.reset_pressed = reset_armed_ && triggers && sticks_active
-            && next.stick_left && next.stick_right;
-        if (!triggers || !sticks_active || next.reset_pressed) reset_armed_ = false;
-        else if (!next.stick_left && !next.stick_right) reset_armed_ = true;
         if (!menu_active) menu_armed_ = false;
         else if (!next.menu) menu_armed_ = true;
         controls_ = next;
@@ -521,7 +508,7 @@ bool OpenXrInput::poll(bool focused, double now) {
     } catch (const std::exception& error) {
         stop_haptics();
         controls_ = {};
-        menu_armed_ = reset_armed_ = false;system_.reset();
+        menu_armed_ = false;system_.reset();
         focused_ = false;
         status_ = error.what();
         return false;

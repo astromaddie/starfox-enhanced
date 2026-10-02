@@ -879,3 +879,10 @@ calls `xrRequestExitSession`, keeps pumping events until the runtime's STOPPING
 (`xrEndSession`) and EXITING arrive, then leaves; a runtime that never answers
 is abandoned after 2 s. New labels have no translations yet and show in English.
 
+**Reset game.** The four-input reset chord (both bumpers and both stick clicks)
+is removed; those inputs are plain game actions again. A runtime-menu-only
+RESET GAME row (main page, between RESUME and QUIT TO STEAM) with a
+NO / BACK, YES / RESET GAME confirm rebuilds the game at INTROMAP and returns to
+the start menu. Saves are kept, as before. Quest and PC players who used the
+chord now use this row.
+
