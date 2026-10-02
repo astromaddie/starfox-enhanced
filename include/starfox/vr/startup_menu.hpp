@@ -113,22 +113,39 @@ public:
     }
     void open_runtime() noexcept {
         runtime=true;open=true;page=Page::main;selection=4;selected_level=0;
-        armed_=false;direction_held_=true;++revision;
+        armed_=false;back_armed_=false;direction_held_=true;++revision;
+    }
+    // Back on any page, equivalent to its BACK row (physical B, L View short
+    // press). On the runtime main page it resumes; on the pre-game main page
+    // there is nowhere to go back to.
+    void back() noexcept {
+        switch(page) {
+        case Page::main: if(!runtime) return; open=false;break;
+        case Page::options: page=Page::main;selection=3;break;
+        case Page::cheats: page=Page::options;selection=0;break;
+        case Page::three_d: page=Page::options;selection=6;break;
+        case Page::two_d: page=Page::options;selection=7;break;
+        case Page::presentation: page=Page::options;selection=9;break;
+        case Page::exit_confirmation: page=Page::main;selection=5;break;
+        }
+        ++revision;
     }
     void sample(const VrControls& input,bool focused) {
         const bool confirm=(input.menu_confirm_active?input.menu_confirm:input.fire) || input.menu;
-        if(!focused) {armed_=false;direction_held_=true;menu_stick_.reset();return;}
+        if(!focused) {armed_=back_armed_=false;direction_held_=true;menu_stick_.reset();return;}
         const auto cardinal=menu_stick_.sample(input.steer.x,input.steer.y);
         const int direction=cardinal==starfox::input::up?-1:cardinal==starfox::input::down?1:0;
         if(!confirm) armed_=true;
+        if(!input.bomb) back_armed_=true;
         if(!direction) direction_held_=false;
         if(!open) return;
         if(direction && !direction_held_) {
             const unsigned rows=row_count();
             selection=(selection+rows+direction)%rows;direction_held_=true;++revision;
         }
+        bool confirmed=false;
         if(confirm && armed_) {
-            armed_=false;
+            confirmed=true;armed_=false;
             if(page==Page::main) {
                 if(selection==0 && alternate_available && !runtime) {extended=!extended;selected_level=0;}
                 else if(selection==1) unlocked_pace=!unlocked_pace;
@@ -189,6 +206,11 @@ public:
                 else {page=Page::options;selection=0;}
             }
             ++revision;
+        }
+        // Physical B (bomb on every profile) or a View short press goes back.
+        // B must be released once after the menu opens, like confirmation.
+        if(!confirmed && ((input.bomb && back_armed_) || input.select_pressed)) {
+            back_armed_=false;back();
         }
     }
     std::string title() const {return page==Page::exit_confirmation?"QUIT TO STEAM?":page==Page::presentation?"VR PRESENTATION":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
@@ -264,6 +286,6 @@ public:
     }
 private:
     MenuStick menu_stick_;
-    bool armed_{},direction_held_{true};
+    bool armed_{},back_armed_{},direction_held_{true};
 };
 }

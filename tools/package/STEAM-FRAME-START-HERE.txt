@@ -26,7 +26,8 @@ Menu is source Start/pause; View is source Select. Cartridge control type and
 face-button swap options still apply to gameplay.
 
 Menu + View, held for half a second, opens this game's runtime menu, which is
-its VR settings. Use the stick/D-pad to move and A or Menu to confirm.
+its VR settings. Use the stick/D-pad to move and A or Menu to confirm; B or a short
+View press goes back.
 OPTIONS > VR PRESENTATION selects the existing camera
 (default) or pilot/cockpit view, world scale, head translation strength,
 cockpit XYZ origin calibration, and RECENTER. Head translation preserves IPD.

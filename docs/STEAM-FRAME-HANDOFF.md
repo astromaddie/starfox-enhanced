@@ -868,6 +868,11 @@ passes through `PositionAnchor::reset(heading, keep_height)`; a system recentre
 (`XrEventDataReferenceSpaceChangePending`) is unchanged. The desktop fallback has
 no haptic buzz.
 
+**Menus.** Physical B (the bomb button on every profile, read before the face
+swap setting) goes back on every menu page, in addition to the BACK rows and the
+View short press. On the runtime main page it resumes; on the pre-game page it
+does nothing. B must be released once after a menu opens, like confirmation.
+
 **Quit to Steam.** The main page's last row is now QUIT TO STEAM, with a
 confirm page ("QUIT TO STEAM?", NO / BACK, YES / QUIT TO STEAM). Confirming
 calls `xrRequestExitSession`, keeps pumping events until the runtime's STOPPING
