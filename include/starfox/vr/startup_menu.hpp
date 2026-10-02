@@ -191,9 +191,9 @@ public:
             ++revision;
         }
     }
-    std::string title() const {return page==Page::exit_confirmation?"EXIT GAME?":page==Page::presentation?"VR PRESENTATION":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
+    std::string title() const {return page==Page::exit_confirmation?"QUIT TO STEAM?":page==Page::presentation?"VR PRESENTATION":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
     std::vector<std::string> labels() const {
-        if(page==Page::exit_confirmation) return {"NO / BACK","YES / EXIT"};
+        if(page==Page::exit_confirmation) return {"NO / BACK","YES / QUIT TO STEAM"};
         if(page==Page::presentation) return {
             std::string("CAMERA: ")+(presentation.cockpit?"COCKPIT":"EXISTING"),
             std::string("FOLLOW SHIP ROTATION: ")+(presentation.follow_ship_rotation?"ON":"OFF"),
@@ -224,11 +224,14 @@ public:
             std::string("SWAP A/B + Y/X: ")+(swap_face_buttons?"ON":"OFF"),
             "MUSIC VOLUME: "+std::to_string(music_volume)+"%","SFX VOLUME: "+std::to_string(sfx_volume)+"%",
             std::string("LANGUAGE: ")+languages[language<6?language:0],"3D OPTIONS","2D OPTIONS",
-            "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%","VR PRESENTATION","BACK"};
-        return {std::string("EXPERIENCE: ")+(extended?"STARFOX EX":"ORIGINAL")+(runtime?" (LOCKED)":alternate_available?"":" (ONLY)"),
+            "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%",
+            "VR PRESENTATION","BACK"};
+        std::vector<std::string> rows{std::string("EXPERIENCE: ")+(extended?"STARFOX EX":"ORIGINAL")+(runtime?" (LOCKED)":alternate_available?"":" (ONLY)"),
             std::string("PACE/SPEED: ")+(unlocked_pace?"UNLOCKED 20 HZ":"ORIGINAL"),
             std::string("MSU-1 MUSIC: ")+(msu_available?(msu_music?"ON":"OFF"):"NOT FOUND"),
-            "OPTIONS",runtime?"RESUME":"START GAME","EXIT"};
+            "OPTIONS",runtime?"RESUME":"START GAME"};
+        rows.push_back("QUIT TO STEAM");
+        return rows;
     }
     std::array<std::u32string_view,2> localized_help() const {
         constexpr std::array<std::array<std::u32string_view,2>,6> help{{

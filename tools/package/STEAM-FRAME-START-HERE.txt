@@ -25,11 +25,15 @@ Native Frame controls: A brake, B bomb, X shoot, Y boost; bumpers roll.
 Menu is source Start/pause; View is source Select. Cartridge control type and
 face-button swap options still apply to gameplay.
 
-Menu + View opens host runtime settings. Use the stick/D-pad to move and A or
-Menu to confirm. OPTIONS > VR PRESENTATION selects the existing camera
+Menu + View, held for half a second, opens this game's runtime menu, which is
+its VR settings. Use the stick/D-pad to move and A or Menu to confirm.
+OPTIONS > VR PRESENTATION selects the existing camera
 (default) or pilot/cockpit view, world scale, head translation strength,
 cockpit XYZ origin calibration, and RECENTER. Head translation preserves IPD.
-Use EXIT in the host menu, then YES / EXIT to quit; NO / BACK returns.
+Hold View for 1 second to recentre (keeps your height); hold 3 seconds to
+recentre and recalibrate height. Both buzz both controllers.
+QUIT TO STEAM, then YES / QUIT TO STEAM, ends the session and exits;
+NO / BACK returns.
 
 No ROM, generated BIN, private music, saves, or keys are included or should be
 redistributed with this package. Physical headset startup, tracking, controller

@@ -802,11 +802,24 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     const LiveGame* last_render_game{};
     std::optional<unsigned> startup_revision;
     auto last_profile=std::chrono::steady_clock::now();
+    std::optional<std::chrono::steady_clock::time_point> exit_requested_at;
     FrameWait frame_wait;
     while((!host.frame_limit || submitted<host.frame_limit)
           && (host.time_limit.count()==0 || std::chrono::steady_clock::now()-started<host.time_limit)
           && !session.exit_requested()) {
-        if((startup.exit_requested && !renderer.frame_pending()) || (host.stop_requested && host.stop_requested())) {cancelled=true;break;}
+        if(host.stop_requested && host.stop_requested()) {cancelled=true;break;}
+        if(startup.exit_requested && !renderer.frame_pending()) {
+            // Quit to Steam: end the OpenXR session through the runtime
+            // (STOPPING -> xrEndSession -> EXITING) and leave once it reports
+            // exit; the bounded wait covers a runtime that never answers.
+            const auto now=std::chrono::steady_clock::now();
+            if(!exit_requested_at) {
+                if(!session.request_exit()) std::cerr<<session.status()<<'\n';
+                exit_requested_at=now;
+            } else if(session.exit_requested() || now-*exit_requested_at>std::chrono::seconds(2)) {
+                cancelled=true;break;
+            }
+        }
         renderer.set_head_translation(startup.presentation.translation_scale());
         const auto result=renderer.step_async([&](unsigned eye,uint32_t image,const auto& tracking_camera,XrTime time) {
             if(!input_time || time!=*input_time) {
@@ -1675,6 +1688,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         // wait. Do not add another fixed millisecond after it.
         else if(!draw.pending()) frame_wait.pause();
     }
+    if(startup.exit_requested) cancelled=true; // Quit to Steam is a clean cancel.
     if(!cancelled && host.frame_limit && submitted<host.frame_limit) {std::cerr<<"Eye rendering diagnostic incomplete: "<<submitted<<"/"<<host.frame_limit<<" stereo frames\n";return 8;}
     if(!cancelled && live && !live->logic_ticks) {std::cerr<<"Live game diagnostic never advanced a focused source tick\n";return 8;}
     std::cout<<"Submitted "<<submitted<<" fenced stereo "<<(render_game?"live game models":render_model?"cartridge model":render_triangle?"triangle":"clear")<<" frames. Experimental presentation; parity incomplete.\n";

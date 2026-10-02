@@ -355,8 +355,11 @@ wearer default/pilot acceptance remain pending. No performance claim is made.
 
 On the immutable `68cda35` device build, the wearer confirmed that the corrected
 gameplay HUD no longer has the large black backing, Original authored rumble
-responds to boost and destruction, and the Frame Menu plus View buttons return
-to Steam. Exact process cleanup semantics were not established. Separate
+responds to boost and destruction, and the wearer exited to Steam. This was
+recorded as Menu plus View returning to Steam, which is wrong for this port:
+Menu plus View opens the port's own runtime menu (see "System layer" below),
+and the exit route actually used was not established. Exact process cleanup
+semantics were not established either. Separate
 runtime telemetry on the later `915774e` run recorded 4320x2160 at 90 Hz, while
 the application recommended 2016x2016 eye views. The wearer accepted the
 corrected depth on `915774e`; a tower-logo flicker was also reported for renderer
@@ -847,6 +850,10 @@ the left grip is the Select input).**
 | L View, hold 3 s | Recentre and recalibrate height. A second buzz |
 | Menu + View, hold both 0.5 s | Opens this port's runtime menu |
 
+Menu + View does **not** return to Steam: that earlier statement in this file
+was wrong. The SNES pause cannot be extended with a "VR settings" item, so the
+runtime menu this chord opens is the port's VR settings (existing/cockpit
+camera, presentation, haptics strength, recentre, and the other options).
 A View press that overlaps a Menu press belongs to the chord and never also
 taps or recentres. A hold that has recentred is never also a Select tap.
 Controls held through focus loss or at launch are ignored until released.
@@ -860,4 +867,10 @@ the menu RECENTER row (which still recalibrates height as well). The 1 s hold
 passes through `PositionAnchor::reset(heading, keep_height)`; a system recentre
 (`XrEventDataReferenceSpaceChangePending`) is unchanged. The desktop fallback has
 no haptic buzz.
+
+**Quit to Steam.** The main page's last row is now QUIT TO STEAM, with a
+confirm page ("QUIT TO STEAM?", NO / BACK, YES / QUIT TO STEAM). Confirming
+calls `xrRequestExitSession`, keeps pumping events until the runtime's STOPPING
+(`xrEndSession`) and EXITING arrive, then leaves; a runtime that never answers
+is abandoned after 2 s. New labels have no translations yet and show in English.
 
