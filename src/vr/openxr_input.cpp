@@ -76,6 +76,11 @@ VrControls select_vr_control_sources(
         selected.reset_pressed = openxr.reset_pressed;
     else if ((desktop.active_actions & reset_chord) == reset_chord)
         selected.reset_pressed = desktop.reset_pressed;
+    selected.view_down = openxr.view_down || desktop.view_down;
+    selected.recentre_pressed = openxr.recentre_pressed || desktop.recentre_pressed;
+    selected.recentre_height_pressed =
+        openxr.recentre_height_pressed || desktop.recentre_height_pressed;
+    selected.menu_chord_pressed = openxr.menu_chord_pressed || desktop.menu_chord_pressed;
     const auto& confirmation=openxr.menu_confirm_active?openxr:desktop;
     selected.menu_confirm=confirmation.menu_confirm;
     selected.menu_confirm_active=confirmation.menu_confirm_active;
@@ -134,6 +139,25 @@ bool OpenXrInput::apply_haptics(
     return true;
 }
 
+void OpenXrInput::pulse_system() noexcept {
+    if (!session_ || !focused_ || !actions_[haptic] || !haptics_available())
+        return;
+    XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
+    vibration.duration = 80'000'000; // 80 ms
+    vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
+    vibration.amplitude = 0.6F;
+    for (std::size_t index = 0; index < hands_.size(); ++index) {
+        if (!haptic_bound_hands_[index]) continue;
+        XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};
+        info.action = actions_[haptic];
+        info.subactionPath = hands_[index];
+        const auto result = api_.apply_haptic(session_, &info,
+            reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+        if (XR_FAILED(result))
+            status_ = "Apply OpenXR system haptic failed: " + std::to_string(result);
+    }
+}
+
 void OpenXrInput::close() noexcept {
     stop_haptics();
     for (auto& space : aim_spaces_) {
@@ -151,7 +175,8 @@ void OpenXrInput::close() noexcept {
     haptic_started_hands_ = {};
     haptic_profile_count_ = 0U;
     controls_ = {};
-    menu_armed_ = select_armed_ = reset_armed_ = false;
+    menu_armed_ = reset_armed_ = false;
+    system_.reset();
     focused_ = false;
 }
 
@@ -317,7 +342,7 @@ bool OpenXrInput::initialize(
     }
 }
 
-bool OpenXrInput::poll(bool focused) {
+bool OpenXrInput::poll(bool focused, double now) {
     if (!set_ || !session_) {
         controls_ = {};
         focused_ = false;
@@ -327,7 +352,7 @@ bool OpenXrInput::poll(bool focused) {
     if (!focused) {
         stop_haptics();
         controls_ = {};
-        menu_armed_ = select_armed_ = reset_armed_ = false;
+        menu_armed_ = reset_armed_ = false;system_.reset();
         focused_ = false;
         return true;
     }
@@ -336,7 +361,7 @@ bool OpenXrInput::poll(bool focused) {
         const auto fail_poll = [&](XrResult result, const char* operation) {
             stop_haptics();
             controls_ = {};
-            menu_armed_ = select_armed_ = reset_armed_ = false;
+            menu_armed_ = reset_armed_ = false;system_.reset();
             focused_ = false;
             status_ = std::string(operation) + ": " + std::to_string(result);
             return false;
@@ -349,7 +374,7 @@ bool OpenXrInput::poll(bool focused) {
         if (sync_result == XR_SESSION_NOT_FOCUSED) {
             stop_haptics();
             controls_ = {};
-            menu_armed_ = select_armed_ = reset_armed_ = false;
+            menu_armed_ = reset_armed_ = false;system_.reset();
             focused_ = false;
             return true;
         }
@@ -429,7 +454,17 @@ bool OpenXrInput::poll(bool focused) {
         result = read_button(select, next.select, select_active);
         if (XR_FAILED(result)) return fail_poll(result, "Read button");
         next.menu_pressed = menu_active && menu_armed_ && next.menu && !controls_.menu;
-        next.select_pressed = select_active && select_armed_ && next.select && !controls_.select;
+        // L View: tap / 1 s recentre / 3 s recentre+height, and the Menu+View
+        // chord (standard section 1). The raw level is kept in view_down; the
+        // game only sees the short press, as a one-poll tap on release.
+        const bool view_level = select_active && next.select;
+        const auto system_events = system_.update(view_level,
+            menu_active && next.menu, now);
+        next.view_down = view_level;
+        next.select = next.select_pressed = system_events.view_tap;
+        next.recentre_pressed = system_events.recentre || system_events.recentre_height;
+        next.recentre_height_pressed = system_events.recentre_height;
+        next.menu_chord_pressed = system_events.open_menu;
 
         bool stick_left_active{};
         result = read_button(stick_left, next.stick_left, stick_left_active);
@@ -478,16 +513,15 @@ bool OpenXrInput::poll(bool focused) {
         else if (!next.stick_left && !next.stick_right) reset_armed_ = true;
         if (!menu_active) menu_armed_ = false;
         else if (!next.menu) menu_armed_ = true;
-        if (!select_active) select_armed_ = false;
-        else if (!next.select) select_armed_ = true;
         controls_ = next;
         focused_ = true;
         status_ = "VR actions synchronized";
+        if (system_events.recentre || system_events.recentre_height) pulse_system();
         return true;
     } catch (const std::exception& error) {
         stop_haptics();
         controls_ = {};
-        menu_armed_ = select_armed_ = reset_armed_ = false;
+        menu_armed_ = reset_armed_ = false;system_.reset();
         focused_ = false;
         status_ = error.what();
         return false;

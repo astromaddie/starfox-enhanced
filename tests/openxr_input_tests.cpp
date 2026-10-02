@@ -368,11 +368,11 @@ int main() try {
     pointer_tracked=false;require(!input.aim_poses(handle<XrSpace>(2),1)[0].has_value());pointer_tracked=true;
     held=true;axis={1,1};require(input.poll(true));
     require(input.controls().fire && !input.controls().menu_pressed);
-    require(input.controls().select && !input.controls().select_pressed);
+    require(!input.controls().select && !input.controls().select_pressed && input.controls().view_down);
     require(std::abs(std::hypot(input.controls().steer.x,input.controls().steer.y)-1)<1e-6);
     held=false;axis={.1F,0};require(input.poll(true));require(input.controls().steer.x==0);
     held=true;require(input.poll(true));require(input.controls().menu_pressed);
-    require(input.controls().select_pressed);
+    require(!input.controls().select_pressed); // Menu + View is the chord, not a Select tap.
     require(input.poll(true));require(!input.controls().menu_pressed);
     require(!input.controls().select_pressed);
     const auto old_syncs=syncs;require(input.poll(false));require(syncs==old_syncs && !input.controls().fire);
@@ -487,16 +487,16 @@ int main() try {
         held.menu=held.select=held.roll_left=held.roll_right=true;
         held.stick_left=held.stick_right=true;
         auto edge=edges.sample(held);
-        require(edge.menu_pressed && edge.select_pressed && edge.reset_pressed);
+        require(edge.menu_pressed && !edge.select_pressed && edge.reset_pressed);
         static_cast<void>(edges.sample(held)); // Held while unfocused; discard this sample.
         edge=edges.sample(held); // Same level after focus resume is not a new press.
         require(!edge.menu_pressed && !edge.select_pressed && !edge.reset_pressed);
         selected=select_vr_control_sources({},edge);
         require(selected.menu && !selected.menu_pressed
-            && selected.select && !selected.select_pressed && !selected.reset_pressed);
+            && !selected.select && selected.view_down && !selected.select_pressed && !selected.reset_pressed);
         static_cast<void>(edges.sample({}));
         edge=edges.sample(held);
-        require(edge.menu_pressed && edge.select_pressed && edge.reset_pressed);
+        require(edge.menu_pressed && !edge.select_pressed && edge.reset_pressed);
     }
     VrGameInput game_input;VrControls controls;
     controls.fire=true;controls.bomb=true;controls.boost=true;controls.brake=true;

@@ -35,6 +35,7 @@ bool PositionAnchor::apply(std::array<XrView,2>& views,float translation_scale) 
         origin_=XrVector3f{views[0].pose.position.x*.5F+views[1].pose.position.x*.5F,
             views[0].pose.position.y*.5F+views[1].pose.position.y*.5F,
             views[0].pose.position.z*.5F+views[1].pose.position.z*.5F};
+        if(keep_height_) {origin_->y=height_;keep_height_=false;}
         if(capture_heading_) {
             const auto& q=views[0].pose.orientation;
             yaw_=std::atan2(2*(q.w*q.y+q.x*q.z),1-2*(q.y*q.y+q.x*q.x));

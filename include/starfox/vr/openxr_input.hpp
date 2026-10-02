@@ -1,6 +1,7 @@
 #pragma once
 #include <openxr/openxr.h>
 #include "starfox/simulation/rumble_sequencer.hpp"
+#include "starfox/vr/system_layer.hpp"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -26,8 +27,14 @@ struct InputApi {
 struct VrControls {
     XrVector2f steer{};
     bool fire{},bomb{},boost{},brake{},menu{},menu_pressed{},roll_left{},roll_right{};
-    bool select{},select_pressed{};
+    // `select` / `select_pressed` are the L View *short press*: a one-poll tap
+    // reported on release (see SystemLayer). `view_down` is the raw level.
+    bool select{},select_pressed{},view_down{};
     bool stick_left{},stick_right{},reset_pressed{};
+    // System layer one-shots (standard section 1). The recentre events are
+    // applied by the application at the next stereo frame boundary;
+    // recentre_height_pressed also recalibrates standing height.
+    bool recentre_pressed{},recentre_height_pressed{},menu_chord_pressed{};
     std::uint32_t active_actions{};
     // Physical menu confirmation is independent of gameplay fire on Frame.
     bool menu_confirm{},menu_confirm_active{};
@@ -61,20 +68,29 @@ inline void desktop_face_buttons(VrControls& controls,bool steam_frame,
 
 // SDL's level-state sampler also runs while the XR session is unfocused; the
 // caller discards those controls but retains these edge states for resume.
+// The View short/hold and Menu+View chord timing matches the OpenXR path.
 class DesktopControlEdges {
 public:
-    [[nodiscard]] VrControls sample(VrControls controls) noexcept {
+    [[nodiscard]] VrControls sample(VrControls controls,
+        double now=SystemLayer::steady_seconds()) noexcept {
         controls.menu_pressed=controls.menu&&!menu_;
-        controls.select_pressed=controls.select&&!select_;
         const bool reset=controls.roll_left&&controls.roll_right
             &&controls.stick_left&&controls.stick_right;
         controls.reset_pressed=reset&&!reset_;
-        menu_=controls.menu;select_=controls.select;reset_=reset;
+        menu_=controls.menu;reset_=reset;
+        const bool view=controls.select;
+        const auto events=system_.update(view,controls.menu,now);
+        controls.view_down=view;
+        controls.select=controls.select_pressed=events.view_tap;
+        controls.recentre_pressed=events.recentre||events.recentre_height;
+        controls.recentre_height_pressed=events.recentre_height;
+        controls.menu_chord_pressed=events.open_menu;
         return controls;
     }
-    void reset() noexcept {menu_=select_=reset_=false;}
+    void reset() noexcept {menu_=reset_=false;system_.reset();}
 private:
-    bool menu_{},select_{},reset_{};
+    bool menu_{},reset_{};
+    SystemLayer system_;
 };
 
 class OpenXrInput {
@@ -86,7 +102,8 @@ public:
     // Attach before session begin. OpenXR permits attachment only once per
     // session; reinitialization requires a fresh caller-owned session.
     bool initialize(XrInstance,XrSession,bool frame_interaction_enabled=false);
-    bool poll(bool focused);
+    // `now` is monotonic seconds for the View hold timing; tests inject it.
+    bool poll(bool focused,double now=SystemLayer::steady_seconds());
     [[nodiscard]] bool focused() const noexcept {return focused_;}
     // The authored dual-band sample maps to XR's single actuator channel by
     // max(low, high), with an unspecified frequency and the native 40 ms pulse.
@@ -106,7 +123,10 @@ private:
     std::array<XrPath,4> haptic_profiles_{};
     std::array<bool,2> haptic_bound_hands_{},haptic_started_hands_{};
     std::uint32_t haptic_profile_count_{};
-    VrControls controls_{};bool menu_armed_{},select_armed_{};
+    // System haptic: 0.6 amplitude, 80 ms, both hands. Not tracked as started rumble, so gameplay stop calls leave it.
+    void pulse_system() noexcept;
+    VrControls controls_{};bool menu_armed_{};
+    SystemLayer system_;
     bool reset_armed_{},focused_{};
     std::string status_;
 };

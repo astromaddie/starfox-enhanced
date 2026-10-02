@@ -846,8 +846,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         startup.selected_level=0;++startup.revision;startup_release=true;
                         sprite_revision.reset();uploaded_backgrounds.clear();uploaded_sprites.clear();
                     }
-                    if(focused && !startup.open && !startup_release && controls.menu && controls.select
-                        && (controls.menu_pressed || controls.select_pressed)) {
+                    // Menu + View held 0.5 s (SystemLayer) opens this port's own
+                    // runtime menu, which is its VR settings; it never leaves the app.
+                    if(focused && !startup.open && !startup_release && controls.menu_chord_pressed) {
                         startup.language=live->game.language();startup.god_mode=live->game.god_mode();
                         startup.default_laser=live->game.default_laser();
                         startup.msu_available=live->game.msu1_available();startup.msu_music=live->game.msu1_music();
@@ -865,6 +866,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(recenter_revision!=startup.recenter_revision) {
                         recenter_revision=startup.recenter_revision;
                         renderer.request_recenter();ui_anchor.reset();
+                    }
+                    if(focused && controls.recentre_pressed) {
+                        // L View hold: 1 s recentres yaw and horizontal position
+                        // (height kept); 3 s also recalibrates height. Applied at
+                        // the next stereo frame boundary like the menu row.
+                        renderer.request_recenter(controls.recentre_height_pressed);ui_anchor.reset();
                     }
                     if(was_menu && (!startup.open || startup.exit_requested) && !preferences_path.empty()
                         && startup.preferences()!=saved_preferences) try {

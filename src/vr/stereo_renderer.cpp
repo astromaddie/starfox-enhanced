@@ -17,7 +17,10 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
         if(!frame_) return Result::error;
         next_eye_=0;cancelling_=false;
         if(frame_->tracking_origin_changed || recenter_pending_) {
-            position_anchor_.reset(recenter_pending_);recenter_pending_=false;
+            const bool keep_height=recenter_pending_ && !recenter_height_pending_
+                && !frame_->tracking_origin_changed;
+            position_anchor_.reset(recenter_pending_,keep_height);
+            recenter_pending_=recenter_height_pending_=false;
         }
         if(!frame_->should_render) {
             frame_.reset();

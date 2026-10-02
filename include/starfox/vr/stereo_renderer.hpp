@@ -21,7 +21,12 @@ public:
         std::function<EyeResult(const StereoFrame&,std::vector<const XrCompositionLayerBaseHeader*>&)> draw;
         std::function<ImageWait()> cancel;
     };
-    void request_recenter() noexcept {recenter_pending_=true;}
+    // Applied at the next stereo frame boundary. The default also recalibrates
+    // height (menu RECENTER row); the L View 1 s hold passes false so height
+    // survives, and the 3 s hold passes true.
+    void request_recenter(bool recalibrate_height=true) noexcept {
+        recenter_pending_=true;recenter_height_pending_|=recalibrate_height;
+    }
     void set_head_translation(float scale) noexcept {head_translation_=scale;}
     StereoRenderer(OpenXrSession& session, OpenXrSwapchains& images,bool anchor_position=false)
         :session_(session),images_(images),anchor_position_(anchor_position) {}
@@ -42,7 +47,7 @@ private:
     bool cancelling_{};
     bool fatal_{};
     bool anchor_position_{};
-    bool recenter_pending_{};float head_translation_{1.F};
+    bool recenter_pending_{},recenter_height_pending_{};float head_translation_{1.F};
     PositionAnchor position_anchor_;
 };
 }

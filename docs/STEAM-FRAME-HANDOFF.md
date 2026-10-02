@@ -829,3 +829,35 @@ the user's retail ROM.
 
 Headset-unverified. Check: overall world size, reticle depth (world sprites
 now sit 12x further away), comfort of near-miss scenery and canopy fit.
+
+## System layer, menus and haptics strength (October 2, standard v0.1)
+
+Adopts the cross-port Steam Frame system layer. **Headset acceptance pending**:
+everything below is covered only by injected-runtime unit tests; no device was
+available and nothing here has been worn.
+
+**Controller system layer (Frame names; the same code serves Touch/Index, where
+the left grip is the Select input).**
+
+| Input | Action |
+| --- | --- |
+| R Menu | Source Start/pause, unchanged |
+| L View, short press (under 1 s) | Source Select; in menus: back. Reported on release, so Select now arrives a press later than before |
+| L View, hold 1 s | Recentre yaw and horizontal position, keeping standing height. 0.6 / 80 ms buzz on both hands |
+| L View, hold 3 s | Recentre and recalibrate height. A second buzz |
+| Menu + View, hold both 0.5 s | Opens this port's runtime menu |
+
+A View press that overlaps a Menu press belongs to the chord and never also
+taps or recentres. A hold that has recentred is never also a Select tap.
+Controls held through focus loss or at launch are ignored until released.
+
+Hold timing lives in `include/starfox/vr/system_layer.hpp` (`SystemLayer`: values
+in, events out, no OpenXR dependency) so the shared `sfvr` library's `sfvr_view`
+can replace it without touching callers. `OpenXrInput::poll` and the desktop
+gamepad fallback (`DesktopControlEdges`) both use it. Recentre requests apply at
+the next stereo frame boundary through `StereoRenderer::request_recenter`, like
+the menu RECENTER row (which still recalibrates height as well). The 1 s hold
+passes through `PositionAnchor::reset(heading, keep_height)`; a system recentre
+(`XrEventDataReferenceSpaceChangePending`) is unchanged. The desktop fallback has
+no haptic buzz.
+
