@@ -4,6 +4,7 @@
 #include "starfox/vr/presentation.hpp"
 #include "starfox/localization/menu_catalog.hpp"
 #include "starfox/render/effect_types.hpp"
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -48,25 +49,29 @@ public:
     unsigned language{},selection{},revision{},default_laser{},selected_level{};
     unsigned music_volume{100},sfx_volume{100},crosshair_colour{};
     unsigned steer_sensitivity_index{};
+    // OpenXR haptic strength, percent (0..100, default 60 = 0.6).
+    unsigned haptics_percent{60};
+    float haptics_strength() const noexcept {return float(std::min(haptics_percent,100U))/100.F;}
     static constexpr std::array<unsigned,5> steer_sensitivities{100,40,55,70,85};
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
-    std::array<uint8_t,27> preferences() const noexcept {
-        return {'S','F','V','R',7,uint8_t(language),uint8_t(god_mode),
+    std::array<uint8_t,28> preferences() const noexcept {
+        return {'S','F','V','R',8,uint8_t(language),uint8_t(god_mode),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
             uint8_t(swap_face_buttons),uint8_t(infinite_bombs),uint8_t(unsigned(infinite_boost)|(unsigned(infinite_lives)<<1)),
             uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
             uint8_t(presentation.cockpit),uint8_t(presentation.world_scale),uint8_t(presentation.head_translation),
-            uint8_t(presentation.origin_x+100),uint8_t(presentation.origin_y+100),uint8_t(presentation.origin_z+100),uint8_t(presentation.follow_ship_rotation)};
+            uint8_t(presentation.origin_x+100),uint8_t(presentation.origin_y+100),uint8_t(presentation.origin_z+100),uint8_t(presentation.follow_ship_rotation),
+            uint8_t(std::min(haptics_percent,100U))};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
-        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26 && bytes.size()!=27) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
-            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>7) || bytes[5]>=6 || bytes[7]>=3
+        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26 && bytes.size()!=27 && bytes.size()!=28) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
+            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>8) || bytes[5]>=6 || bytes[7]>=3
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
-        if(bytes.size()!=(bytes[4]>=7?27U:bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
+        if(bytes.size()!=(bytes[4]>=8?28U:bytes[4]>=7?27U:bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -82,9 +87,11 @@ public:
         if(bytes[4]>=6 && (bytes[20]>1 || bytes[21]>=6 || bytes[22]>=5
             || bytes[23]>200 || bytes[24]>200 || bytes[25]>200)) return false;
         if(bytes[4]>=7 && bytes[26]>1) return false;
+        if(bytes[4]>=8 && bytes[27]>100) return false;
         presentation={};
         if(bytes[4]>=6) presentation={bytes[20]!=0,bytes[22],bytes[21],int(bytes[23])-100,int(bytes[24])-100,int(bytes[25])-100};
         if(bytes[4]>=7) presentation.follow_ship_rotation=bytes[26]!=0;
+        haptics_percent=bytes[4]>=8?bytes[27]:60; // v1-v7 keep the 0.6 default
         language=bytes[5];god_mode=bytes[6];default_laser=bytes[7];msu_music=bytes[8];
         music_volume=bytes[9];sfx_volume=bytes[10];unlocked_pace=(bytes[11]&1)!=0;
         ray_tracing=bytes[4]>=2 && (bytes[11]&2)!=0;
@@ -102,7 +109,7 @@ public:
         case Page::presentation: return 9;
         case Page::exit_confirmation: case Page::reset_confirmation: return 2;
         case Page::main: return runtime?7:6; // RESET GAME only mid-game
-        case Page::options: return 11;
+        case Page::options: return 12;
         case Page::three_d: return ray_tracing_available?5:4;
         case Page::two_d: return 5;
         default: return 7;
@@ -140,7 +147,7 @@ public:
         case Page::cheats: page=Page::options;selection=0;break;
         case Page::three_d: page=Page::options;selection=6;break;
         case Page::two_d: page=Page::options;selection=7;break;
-        case Page::presentation: page=Page::options;selection=9;break;
+        case Page::presentation: page=Page::options;selection=10;break;
         case Page::exit_confirmation: page=Page::main;selection=quit_row();break;
         case Page::reset_confirmation: page=Page::main;selection=reset_row();break;
         }
@@ -180,7 +187,8 @@ public:
                 else if(selection==6) {page=Page::three_d;selection=0;}
                 else if(selection==7) {page=Page::two_d;selection=0;}
                 else if(selection==8) steer_sensitivity_index=(steer_sensitivity_index+1)%steer_sensitivities.size();
-                else if(selection==9) {page=Page::presentation;selection=0;}
+                else if(selection==9) haptics_percent=(std::min(haptics_percent,100U)+10)%110;
+                else if(selection==10) {page=Page::presentation;selection=0;}
                 else {page=Page::main;selection=3;}
             } else if(page==Page::exit_confirmation) {
                 if(selection==1) exit_requested=true;
@@ -197,7 +205,7 @@ public:
                     int& value=selection==4?presentation.origin_x:selection==5?presentation.origin_y:presentation.origin_z;
                     value=value>=100?-100:value+5;
                 } else if(selection==7) ++recenter_revision;
-                else {page=Page::options;selection=9;}
+                else {page=Page::options;selection=10;}
             } else if(page==Page::three_d) {
                 if(selection==0) model_effect=next_style(model_effect);
                 else if(selection==1) model_intensity=(model_intensity+25)%125;
@@ -268,7 +276,7 @@ public:
             "MUSIC VOLUME: "+std::to_string(music_volume)+"%","SFX VOLUME: "+std::to_string(sfx_volume)+"%",
             std::string("LANGUAGE: ")+languages[language<6?language:0],"3D OPTIONS","2D OPTIONS",
             "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%",
-            "VR PRESENTATION","BACK"};
+            "HAPTICS STRENGTH: "+std::to_string(std::min(haptics_percent,100U))+"%","VR PRESENTATION","BACK"};
         std::vector<std::string> rows{std::string("EXPERIENCE: ")+(extended?"STARFOX EX":"ORIGINAL")+(runtime?" (LOCKED)":alternate_available?"":" (ONLY)"),
             std::string("PACE/SPEED: ")+(unlocked_pace?"UNLOCKED 20 HZ":"ORIGINAL"),
             std::string("MSU-1 MUSIC: ")+(msu_available?(msu_music?"ON":"OFF"):"NOT FOUND"),

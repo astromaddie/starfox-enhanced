@@ -30,7 +30,8 @@ its VR settings. Use the stick/D-pad to move and A or Menu to confirm; B or a sh
 View press goes back.
 OPTIONS > VR PRESENTATION selects the existing camera
 (default) or pilot/cockpit view, world scale, head translation strength,
-cockpit XYZ origin calibration, and RECENTER. Head translation preserves IPD.
+cockpit XYZ origin calibration, and RECENTER. OPTIONS > HAPTICS STRENGTH sets
+the vibration strength (default 60%). Head translation preserves IPD.
 Hold View for 1 second to recentre (keeps your height); hold 3 seconds to
 recentre and recalibrate height. Both buzz both controllers.
 RESET GAME (runtime menu, with a confirm) restarts at the start menu and keeps

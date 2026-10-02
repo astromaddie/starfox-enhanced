@@ -2,7 +2,9 @@
 #include <openxr/openxr.h>
 #include "starfox/simulation/rumble_sequencer.hpp"
 #include "starfox/vr/system_layer.hpp"
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <optional>
@@ -107,6 +109,11 @@ public:
     bool apply_haptics(const starfox::simulation::RumbleEffect&) noexcept;
     void stop_haptics() noexcept;
     [[nodiscard]] bool haptics_available() const noexcept;
+    // User strength 0..1 (default 0.6), applied to every OpenXR haptic output.
+    void set_haptics_strength(float strength) noexcept {
+        haptics_strength_=std::isfinite(strength)?std::clamp(strength,0.F,1.F):0.6F;
+    }
+    [[nodiscard]] float haptics_strength() const noexcept {return haptics_strength_;}
     std::array<std::optional<XrPosef>,2> aim_poses(XrSpace base,XrTime time) const noexcept;
     void close() noexcept;
     const VrControls& controls() const noexcept {return controls_;}
@@ -120,10 +127,12 @@ private:
     std::array<XrPath,4> haptic_profiles_{};
     std::array<bool,2> haptic_bound_hands_{},haptic_started_hands_{};
     std::uint32_t haptic_profile_count_{};
-    // System haptic: 0.6 amplitude, 80 ms, both hands. Not tracked as started rumble, so gameplay stop calls leave it.
+    // System haptic: 0.6 amplitude, 80 ms, both hands, scaled by the strength
+    // setting. Not tracked as started rumble, so gameplay stop calls leave it.
     void pulse_system() noexcept;
     VrControls controls_{};bool menu_armed_{};
     SystemLayer system_;
+    float haptics_strength_{0.6F};
     bool focused_{};
     std::string status_;
 };

@@ -782,7 +782,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     if(startup.open && !preferences_path.empty()) try {
         if(std::filesystem::exists(preferences_path)) {
             const auto size=std::filesystem::file_size(preferences_path);
-            if((size!=16 && size!=20 && size!=26 && size!=27)
+            if((size!=16 && size!=20 && size!=26 && size!=27 && size!=28)
                 || !startup.restore_preferences(starfox::state::read_file(preferences_path)))
                 std::cerr<<"Invalid VR preferences; using defaults\n";
         }
@@ -829,6 +829,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 if(parked_game) {preview_game=std::move(live);live=std::move(parked_game);}
                 const bool session_focused=session.state()==XR_SESSION_STATE_FOCUSED;
                 if(!input.poll(session_focused)) return starfox::vr::StereoRenderer::EyeResult::failed;
+                input.set_haptics_strength(startup.haptics_strength());
                 const bool input_focused=input.focused();
                 const auto desktop_sample=host.desktop_controls
                     ? host.desktop_controls() : starfox::vr::VrControls{};

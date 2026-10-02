@@ -244,7 +244,7 @@ int main() try {
         const auto softened=menu.gameplay_controls(steer);
         require(std::abs(softened.steer.x-.4F)<.001F
             && std::abs(softened.steer.y+.2F)<.001F);
-        menu.selection=10;click();require(menu.page==Page::main && menu.selection==3);
+        menu.selection=11;click();require(menu.page==Page::main && menu.selection==3);
         menu.alternate_available=true;menu.selection=0;click();require(menu.extended && menu.selected_level==0);
         menu.open_runtime();require(menu.selection==4 && menu.page==Page::main && menu.labels()[4]=="RESUME");
         menu.selection=0;click();require(menu.extended && menu.labels()[0].find("LOCKED")!=std::string::npos);
@@ -305,7 +305,7 @@ int main() try {
         require(migrated.restore_preferences(std::span(version6).first(26)) && migrated.presentation.cockpit
             && !migrated.presentation.follow_ship_rotation);
         require(!migrated.restore_preferences(version6)); // Version and size must agree.
-        require(presentation_menu.preferences()[4]==7 && presentation_menu.preferences().size()==27);
+        require(presentation_menu.preferences()[4]==8 && presentation_menu.preferences().size()==28);
         presentation_menu.selection=7;presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.recenter_revision==1);
         presentation_menu.presentation={true,false,5,-100,100,35};
@@ -405,6 +405,8 @@ int main() try {
         path_value("/interaction_profiles/oculus/touch_controller")};
     require(input.poll(true) && input.haptics_available());
     const starfox::simulation::RumbleEffect authored{0x1111U,0x8888U,40U};
+    require(input.haptics_strength()==.6F); // Default strength.
+    input.set_haptics_strength(1.F);
     require(input.apply_haptics(authored) && haptic_applies==2);
     require(std::abs(haptic_amplitude-float(0x8888U)/65535.F)<.00001F
         && haptic_duration==40'000'000 && haptic_api_valid);

@@ -30,7 +30,7 @@ Open the in-game menu with both grips held for half a second (Menu + Select),
 then choose RESET GAME and confirm to return to the start menu. This
 discards the current unsaved session, not saved data. The old trigger plus
 thumbstick-click reset chord was removed; those inputs are normal game controls.
-B goes back in every menu page.
+B goes back in every menu page. HAPTICS STRENGTH is in OPTIONS (default 60%).
 
 PC SHORTCUTS
 F1: in-game options (experience stays locked).

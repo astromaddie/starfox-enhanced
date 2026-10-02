@@ -113,7 +113,12 @@ bool OpenXrInput::apply_haptics(
     vibration.duration = static_cast<XrDuration>(effect.duration_ms) * 1'000'000;
     vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
     vibration.amplitude = static_cast<float>(strength)
-        / static_cast<float>(std::numeric_limits<std::uint16_t>::max());
+        / static_cast<float>(std::numeric_limits<std::uint16_t>::max())
+        * haptics_strength_;
+    if (vibration.amplitude <= 0.0F) {
+        stop_haptics();
+        return true;
+    }
 
     for (std::size_t index = 0; index < hands_.size(); ++index) {
         if (!haptic_bound_hands_[index]) continue;
@@ -133,12 +138,13 @@ bool OpenXrInput::apply_haptics(
 }
 
 void OpenXrInput::pulse_system() noexcept {
-    if (!session_ || !focused_ || !actions_[haptic] || !haptics_available())
+    if (!session_ || !focused_ || !actions_[haptic] || !haptics_available()
+        || haptics_strength_ <= 0.0F)
         return;
     XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
     vibration.duration = 80'000'000; // 80 ms
     vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
-    vibration.amplitude = 0.6F;
+    vibration.amplitude = 0.6F * haptics_strength_;
     for (std::size_t index = 0; index < hands_.size(); ++index) {
         if (!haptic_bound_hands_[index]) continue;
         XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};

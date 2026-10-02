@@ -886,3 +886,14 @@ NO / BACK, YES / RESET GAME confirm rebuilds the game at INTROMAP and returns to
 the start menu. Saves are kept, as before. Quest and PC players who used the
 chord now use this row.
 
+**Haptics strength.** OPTIONS > HAPTICS STRENGTH cycles 0-100% in 10% steps
+(default 60%). It scales all OpenXR haptic output (authored rumble and the
+system buzz); 0% silences it. Desktop gamepad rumble is not scaled. Preferences
+are version 8, 28 bytes: the v7 record plus one byte, percent 0-100. Versions
+1-7 migrate unchanged with 60%, and a v8 byte above 100 rejects the record, like
+the other fields. The standard's `haptics` key maps to this byte; no env
+override exists yet.
+
+**Unchanged on purpose.** Fire/bomb/boost/brake/roll mappings. Adding trigger
+aliases for fire is a pending user decision.
+
