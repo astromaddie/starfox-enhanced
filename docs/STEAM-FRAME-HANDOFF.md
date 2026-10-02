@@ -858,9 +858,10 @@ A View press that overlaps a Menu press belongs to the chord and never also
 taps or recentres. A hold that has recentred is never also a Select tap.
 Controls held through focus loss or at launch are ignored until released.
 
-Hold timing lives in `include/starfox/vr/system_layer.hpp` (`SystemLayer`: values
-in, events out, no OpenXR dependency) so the shared `sfvr` library's `sfvr_view`
-can replace it without touching callers. `OpenXrInput::poll` and the desktop
+Hold timing is the shared `sfvr` library's `sfvr_view` (vendored in
+`third_party/sfvr`, commit in `VERSION`). `include/starfox/vr/system_layer.hpp`
+(`SystemLayer`) is a thin adapter over it that adds only the Menu + View chord
+and the rule that a chord press never also taps or recentres. `OpenXrInput::poll` and the desktop
 gamepad fallback (`DesktopControlEdges`) both use it. Recentre requests apply at
 the next stereo frame boundary through `StereoRenderer::request_recenter`, like
 the menu RECENTER row (which still recalibrates height as well). The 1 s hold
@@ -888,7 +889,11 @@ chord now use this row.
 
 **Haptics strength.** OPTIONS > HAPTICS STRENGTH cycles 0-100% in 10% steps
 (default 60%). It scales all OpenXR haptic output (authored rumble and the
-system buzz); 0% silences it. Desktop gamepad rumble is not scaled. Preferences
+system buzz); 0% silences it. Desktop gamepad rumble is not scaled. All OpenXR
+haptic output goes through one `sfvr_haptic_queue`: rumble is queued with
+`sfvr_haptic_rumble`, the system buzz as `SFVR_HAPTIC_SYSTEM`, and
+`OpenXrInput::flush_haptics()` sends the coalesced result (strongest amplitude,
+longest duration, per hand) once per frame, scaled by the setting. Preferences
 are version 8, 28 bytes: the v7 record plus one byte, percent 0-100. Versions
 1-7 migrate unchanged with 60%, and a v8 byte above 100 rejects the record, like
 the other fields. The standard's `haptics` key maps to this byte; no env

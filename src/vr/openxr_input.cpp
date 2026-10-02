@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 #include <stdexcept>
 #include <vector>
 
@@ -83,6 +84,8 @@ VrControls select_vr_control_sources(
 OpenXrInput::~OpenXrInput() { close(); }
 
 void OpenXrInput::stop_haptics() noexcept {
+    sfvr_haptic_queue_clear(&haptic_queue_);
+    rumble_queued_ = false;
     if (!session_ || !actions_[haptic]) return;
     bool failed = false;
     for (std::size_t index = 0; index < hands_.size(); ++index) {
@@ -108,52 +111,62 @@ bool OpenXrInput::apply_haptics(
         stop_haptics();
         return true;
     }
-    const auto strength = std::max(effect.low_frequency, effect.high_frequency);
-    XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
-    vibration.duration = static_cast<XrDuration>(effect.duration_ms) * 1'000'000;
-    vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
-    vibration.amplitude = static_cast<float>(strength)
-        / static_cast<float>(std::numeric_limits<std::uint16_t>::max())
-        * haptics_strength_;
-    if (vibration.amplitude <= 0.0F) {
-        stop_haptics();
-        return true;
-    }
-
-    for (std::size_t index = 0; index < hands_.size(); ++index) {
-        if (!haptic_bound_hands_[index]) continue;
-        XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};
-        info.action = actions_[haptic];
-        info.subactionPath = hands_[index];
-        const auto result = api_.apply_haptic(session_, &info,
-            reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
-        if (XR_FAILED(result)) {
-            status_ = "Apply OpenXR haptics failed: " + std::to_string(result);
-            stop_haptics();
-            return false;
-        }
-        haptic_started_hands_[index] = true;
-    }
+    sfvr_haptic_rumble(&haptic_queue_, SFVR_HAND_BOTH, effect.low_frequency,
+        effect.high_frequency);
+    rumble_queued_ = true;
     return true;
 }
 
-void OpenXrInput::pulse_system() noexcept {
-    if (!session_ || !focused_ || !actions_[haptic] || !haptics_available()
-        || haptics_strength_ <= 0.0F)
-        return;
+namespace {
+struct HapticFlush {
+    const std::array<bool, 2>& bound;
+    std::array<bool, 2>& started;
+    const std::array<XrPath, 2>& hands;
+    XrSession session;
+    XrAction action;
+    const InputApi& api;
+    bool rumble;
+    bool failed{};
+    XrResult failure{XR_SUCCESS};
+};
+void apply_flushed_pulse(int hand, float amplitude, float seconds, void* user) {
+    auto& flush = *static_cast<HapticFlush*>(user);
+    if (hand < 0 || hand > 1 || !flush.bound[static_cast<std::size_t>(hand)]) return;
     XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
-    vibration.duration = 80'000'000; // 80 ms
+    vibration.duration = static_cast<XrDuration>(std::llround(
+        static_cast<double>(seconds) * 1.0e6)) * 1000; // whole microseconds
     vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
-    vibration.amplitude = 0.6F * haptics_strength_;
-    for (std::size_t index = 0; index < hands_.size(); ++index) {
-        if (!haptic_bound_hands_[index]) continue;
-        XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};
-        info.action = actions_[haptic];
-        info.subactionPath = hands_[index];
-        const auto result = api_.apply_haptic(session_, &info,
-            reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
-        if (XR_FAILED(result))
-            status_ = "Apply OpenXR system haptic failed: " + std::to_string(result);
+    vibration.amplitude = amplitude;
+    XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};
+    info.action = flush.action;
+    info.subactionPath = flush.hands[static_cast<std::size_t>(hand)];
+    const auto result = flush.api.apply_haptic(flush.session, &info,
+        reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+    if (XR_FAILED(result)) {
+        flush.failed = true;
+        flush.failure = result;
+        return;
+    }
+    // Only rumble is "started": a lone system buzz is not cut short by the
+    // gameplay stop calls the application makes while a menu is open.
+    if (flush.rumble) flush.started[static_cast<std::size_t>(hand)] = true;
+}
+} // namespace
+
+void OpenXrInput::flush_haptics() noexcept {
+    const bool buzz = std::exchange(system_buzz_pending_, false);
+    const bool rumble = std::exchange(rumble_queued_, false);
+    if (!session_ || !focused_ || !actions_[haptic] || !haptics_available()) {
+        sfvr_haptic_queue_clear(&haptic_queue_);
+        return;
+    }
+    if (buzz) sfvr_haptic_event(&haptic_queue_, SFVR_HAND_BOTH, SFVR_HAPTIC_SYSTEM);
+    HapticFlush flush{haptic_bound_hands_, haptic_started_hands_, hands_, session_,
+        actions_[haptic], api_, rumble};
+    sfvr_haptic_flush(&haptic_queue_, haptics_strength_, apply_flushed_pulse, &flush);
+    if (flush.failed) {
+        status_ = "Apply OpenXR haptics failed: " + std::to_string(flush.failure);
+        stop_haptics();
     }
 }
 
@@ -173,6 +186,8 @@ void OpenXrInput::close() noexcept {
     haptic_bound_hands_ = {};
     haptic_started_hands_ = {};
     haptic_profile_count_ = 0U;
+    sfvr_haptic_queue_clear(&haptic_queue_);
+    system_buzz_pending_ = rumble_queued_ = false;
     controls_ = {};
     menu_armed_ = false;
     system_.reset();
@@ -509,7 +524,7 @@ bool OpenXrInput::poll(bool focused, double now) {
         controls_ = next;
         focused_ = true;
         status_ = "VR actions synchronized";
-        if (system_events.recentre || system_events.recentre_height) pulse_system();
+        if (system_events.recentre || system_events.recentre_height) system_buzz_pending_ = true;
         return true;
     } catch (const std::exception& error) {
         stop_haptics();

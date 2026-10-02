@@ -1,11 +1,13 @@
 #pragma once
 #include <chrono>
+#include "sfvr/sfvr_view.h"
 
 namespace starfox::vr {
 // Cross-port system layer (steam-frame-vr-port standard, section 1): L View and
-// R Menu timing. This is deliberately a plain value-in, events-out state
-// machine with no OpenXR, haptic or renderer dependency, so it can be swapped
-// for the shared sfvr library's sfvr_view without touching its callers.
+// R Menu timing. The View state machine is the shared sfvr library's
+// sfvr_view (vendored in third_party/sfvr); this class is a thin adapter that
+// adds only what is specific to this port: the L View + R Menu chord and the
+// rule that a View press belonging to the chord never also taps or recentres.
 //
 //   L View short press (< 1 s)   -> view_tap (the game's Select / menu back).
 //                                   Reported on release, because a press is
@@ -16,45 +18,33 @@ namespace starfox::vr {
 //                                   1 s one, not instead of it.
 //   L View + R Menu held 0.5 s   -> open_menu (this port's runtime menu).
 //
-// A View press that overlaps a Menu press belongs to the menu chord: it never
-// produces a tap or a recentre. A hold that has already recentred is never also
-// a tap. Controls held at construction or through a reset() (focus loss) are
-// ignored until released, so they cannot fire on resume.
+// A hold that has already recentred is never also a tap. A View press that
+// was already down at construction or through a reset() (focus loss) is
+// ignored until released (sfvr_view's rule), and the chord additionally needs
+// Menu to have been seen released, so nothing fires on resume.
 struct SystemLayerEvents {
     bool view_tap{},recentre{},recentre_height{},open_menu{};
 };
 
 class SystemLayer {
 public:
-    static constexpr double recentre_hold_seconds=1.0;
-    static constexpr double height_hold_seconds=3.0;
     static constexpr double menu_chord_hold_seconds=0.5;
 
     // `now` is monotonic seconds; only differences are used.
     [[nodiscard]] SystemLayerEvents update(bool view_down,bool menu_down,double now) noexcept {
         SystemLayerEvents events;
-        if(!armed_) {
-            if(!view_down && !menu_down) armed_=true;
-            return events;
+        const unsigned view=sfvr_view_update(&view_,nullptr,view_down?1:0,now);
+        if(!menu_down) menu_armed_=true;
+        if(!view_down) view_armed_=true;
+        if(view_down && !view_prev_) {recentred_=false;swallowed_=menu_down;}
+        // Menu overlapping a View press claims it, until that press has recentred.
+        if(view_down && menu_down && !recentred_) swallowed_=true;
+        if(!swallowed_) {
+            if(view&SFVR_VIEW_SHORT_PRESS) events.view_tap=true;
+            if(view&SFVR_VIEW_RECENTRE) {events.recentre=true;recentred_=true;}
+            if(view&SFVR_VIEW_RECALIBRATE_HEIGHT) events.recentre_height=true;
         }
-        if(view_down && !view_prev_) {
-            view_since_=now;recentre_done_=height_done_=false;
-            swallowed_=menu_down;
-        }
-        if(view_prev_ || view_down) {
-            const double held=now-view_since_;
-            if(view_down && menu_down && !recentre_done_) swallowed_=true;
-            if(!swallowed_) {
-                if(!recentre_done_ && held>=recentre_hold_seconds) {
-                    recentre_done_=true;events.recentre=true;
-                }
-                if(recentre_done_ && !height_done_ && held>=height_hold_seconds) {
-                    height_done_=true;events.recentre_height=true;
-                }
-            }
-            if(!view_down && !swallowed_ && !recentre_done_) events.view_tap=true;
-        }
-        if(view_down && menu_down && !recentre_done_) {
+        if(view_down && menu_down && menu_armed_ && view_armed_ && !recentred_) {
             if(!chord_active_) {chord_active_=true;chord_since_=now;chord_done_=false;}
             if(!chord_done_ && now-chord_since_>=menu_chord_hold_seconds) {
                 chord_done_=true;events.open_menu=true;
@@ -65,13 +55,15 @@ public:
     }
     // Focus loss, session change or failure: drop all in-flight presses.
     void reset() noexcept {*this=SystemLayer{};}
+
     [[nodiscard]] static double steady_seconds() noexcept {
         return std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 private:
-    bool armed_{},view_prev_{},swallowed_{},recentre_done_{},height_done_{};
+    sfvr_view_button view_{};
+    bool menu_armed_{},view_armed_{},view_prev_{},swallowed_{},recentred_{};
     bool chord_active_{},chord_done_{};
-    double view_since_{},chord_since_{};
+    double chord_since_{};
 };
 }

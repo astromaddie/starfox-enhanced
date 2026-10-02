@@ -959,6 +959,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         game_controls.steer={};game_controls.select=game_controls.select_pressed=false;
                     }
                     const auto advance=live->driver->advance(time,game_controls,playing,startup.presentation);
+                    // Once per frame: coalesced rumble plus any system buzz, scaled by
+                    // the HAPTICS STRENGTH setting, goes to the runtime here.
+                    input.flush_haptics();
                     if(!live->game.paused() && sandbox.active()) {
                         sandbox.commit(live->game.objects());live->history->capture();
                     }

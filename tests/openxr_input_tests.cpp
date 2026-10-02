@@ -500,7 +500,8 @@ int main() try {
     const starfox::simulation::RumbleEffect authored{0x1111U,0x8888U,40U};
     require(input.haptics_strength()==.6F); // Default strength.
     input.set_haptics_strength(1.F);
-    require(input.apply_haptics(authored) && haptic_applies==2);
+    require(input.apply_haptics(authored) && haptic_applies==0); // Queued, not yet sent.
+    input.flush_haptics();require(haptic_applies==2);
     require(std::abs(haptic_amplitude-float(0x8888U)/65535.F)<.00001F
         && haptic_duration==40'000'000 && haptic_api_valid);
     const auto stops_before_focus=haptic_stops;
@@ -509,11 +510,13 @@ int main() try {
     const auto applies_before_unfocused=haptic_applies;
     require(!input.apply_haptics(authored) && haptic_applies==applies_before_unfocused);
     require(input.poll(true) && input.focused());
-    require(input.apply_haptics(authored));
+    require(input.apply_haptics(authored));input.flush_haptics();
     fail_haptic=true;
-    require(!input.apply_haptics(authored) && haptic_stops==stops_before_focus+4);
+    require(input.apply_haptics(authored));input.flush_haptics(); // The failure surfaces at the flush.
+    require(haptic_stops==stops_before_focus+4
+        && input.status().find("Apply OpenXR haptics failed")!=std::string::npos);
     fail_haptic=false;
-    require(input.apply_haptics(authored));
+    require(input.apply_haptics(authored));input.flush_haptics();
     fail_haptic_stop=true;input.stop_haptics();
     require(haptic_stops==stops_before_focus+6
         && input.status().find("Stop OpenXR haptics failed")!=std::string::npos);
@@ -532,14 +535,22 @@ int main() try {
         // --- Haptic strength: every OpenXR output is scaled, 0 silences it.
         input.set_haptics_strength(.5F);
         auto applies=haptic_applies;
-        require(input.apply_haptics(authored) && haptic_applies==applies+2
+        require(input.apply_haptics(authored) && haptic_applies==applies); // Nothing before the flush.
+        input.flush_haptics();
+        require(haptic_applies==applies+2
             && std::abs(haptic_amplitude-float(0x8888U)/65535.F*.5F)<.00001F && haptic_duration==40'000'000);
+        input.flush_haptics();require(haptic_applies==applies+2); // An empty queue sends nothing.
         input.set_haptics_strength(.25F);
-        require(input.apply_haptics({0xFFFFU,0x0000U,40U})
-            && std::abs(haptic_amplitude-.25F)<.00001F);
+        require(input.apply_haptics({0xFFFFU,0x0000U,40U}));input.flush_haptics();
+        require(std::abs(haptic_amplitude-.25F)<.00001F);
+        // Overlapping pulses in one frame coalesce into the strongest, once per hand.
+        input.set_haptics_strength(1.F);applies=haptic_applies;
+        require(input.apply_haptics({0x2000U,0x1000U,40U}) && input.apply_haptics({0x8000U,0x4000U,40U}));
+        input.flush_haptics();
+        require(haptic_applies==applies+2 && std::abs(haptic_amplitude-float(0x8000U)/65535.F)<.00001F);
         input.set_haptics_strength(0.F);
-        applies=haptic_applies;const auto stops=haptic_stops;
-        require(input.apply_haptics(authored) && haptic_applies==applies && haptic_stops>stops);
+        applies=haptic_applies;
+        require(input.apply_haptics(authored));input.flush_haptics();require(haptic_applies==applies);
         input.set_haptics_strength(7.F);require(input.haptics_strength()==1.F);
         input.set_haptics_strength(-1.F);require(input.haptics_strength()==0.F);
         input.set_haptics_strength(std::numeric_limits<float>::quiet_NaN());require(input.haptics_strength()==.6F);
@@ -549,7 +560,7 @@ int main() try {
         independent_buttons=true;button_states={};
         const auto view=[&](bool down) {button_states[9]=down;};
         const auto menu_button=[&](bool down) {button_states[6]=down;};
-        const auto poll_at=[&](double at) {require(input.poll(true,at));return input.controls();};
+        const auto poll_at=[&](double at) {require(input.poll(true,at));input.flush_haptics();return input.controls();};
         require(input.poll(false,0.0));
         poll_at(10.0); // Released: armed.
         input.set_haptics_strength(1.F);
@@ -593,6 +604,20 @@ int main() try {
         view(true);poll_at(50.0);poll_at(51.0);input.stop_haptics();
         require(haptic_applies==applies+2 && haptic_stops==stopped);
         view(false);poll_at(51.1);
+        // A stop between the poll that queues the buzz and the frame's flush keeps it.
+        view(true);poll_at(52.0);applies=haptic_applies;
+        require(input.poll(true,53.0) && haptic_applies==applies);
+        input.stop_haptics();input.flush_haptics();
+        require(haptic_applies==applies+2 && haptic_duration==80'000'000);
+        view(false);poll_at(53.1);
+        // Rumble and the buzz in the same frame coalesce: one pulse per hand,
+        // strongest amplitude, longest duration.
+        view(true);poll_at(54.0);applies=haptic_applies;
+        require(input.poll(true,55.0) && input.apply_haptics(authored));
+        input.flush_haptics();
+        require(haptic_applies==applies+2 && std::abs(haptic_amplitude-.6F)<.00001F
+            && haptic_duration==80'000'000);
+        view(false);poll_at(55.1);
 
         // Menu + View held 0.5 s opens the runtime menu once; the View press is
         // swallowed (no tap, no recentre) even when held for seconds afterwards.
