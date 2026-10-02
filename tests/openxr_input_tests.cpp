@@ -328,6 +328,99 @@ int main() try {
         presentation_menu.sample({},true);presentation_menu.sample(press,true);
         presentation_menu.selection=1;presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.exit_requested);
+        // Version 8 adds the haptic strength (percent, default 60).
+        {
+            StartupMenu haptic;require(haptic.haptics_percent==60 && haptic.haptics_strength()==.6F);
+            haptic.page=Page::options;haptic.selection=9;
+            require(haptic.labels()[9]=="HAPTICS STRENGTH: 60%" && haptic.row_count()==12
+                && haptic.labels()[10]=="VR PRESENTATION" && haptic.labels()[11]=="BACK");
+            for(const unsigned expected:{70U,80U,90U,100U,0U,10U}) {
+                haptic.sample({},true);haptic.sample(press,true);require(haptic.haptics_percent==expected);
+            }
+            haptic.haptics_percent=35;
+            StartupMenu copy;require(copy.restore_preferences(haptic.preferences()) && copy.haptics_percent==35);
+            require(copy.preferences()==haptic.preferences());
+            // v7 -> v8 keeps every existing value and gets the 0.6 default.
+            StartupMenu old;old.language=3;old.god_mode=true;old.default_laser=2;old.msu_music=true;
+            old.music_volume=30;old.sfx_volume=70;old.crosshair_colour=5;old.swap_face_buttons=true;
+            old.infinite_bombs=true;old.infinite_boost=true;old.infinite_lives=true;old.model_effect=14;
+            old.world_effect=16;old.model_intensity=50;old.world_intensity=75;old.steer_sensitivity_index=2;
+            old.ray_tracing=true;old.enhanced_sky=true;old.unlocked_pace=false;
+            old.presentation={true,3,2,10,-20,30,true};
+            auto v7=old.preferences();v7[4]=7;
+            StartupMenu migrated7;migrated7.haptics_percent=15;
+            require(migrated7.restore_preferences(std::span(v7).first(27)) && migrated7.haptics_percent==60);
+            require(migrated7.language==3 && migrated7.god_mode && migrated7.default_laser==2 && migrated7.msu_music
+                && migrated7.music_volume==30 && migrated7.sfx_volume==70 && migrated7.crosshair_colour==5
+                && migrated7.swap_face_buttons && migrated7.infinite_bombs && migrated7.infinite_boost
+                && migrated7.infinite_lives && migrated7.model_effect==14 && migrated7.world_effect==16
+                && migrated7.model_intensity==50 && migrated7.world_intensity==75
+                && migrated7.steer_sensitivity_index==2 && migrated7.ray_tracing && migrated7.enhanced_sky
+                && !migrated7.unlocked_pace && migrated7.presentation.cockpit
+                && migrated7.presentation.follow_ship_rotation && migrated7.presentation.origin_x==10
+                && migrated7.presentation.origin_y==-20 && migrated7.presentation.origin_z==30);
+            require(migrated7.preferences()[4]==8 && migrated7.preferences()[27]==60);
+            require(!migrated7.restore_preferences(v7)); // v7 header with a v8-sized record.
+            auto bad=old.preferences();bad[27]=101;require(!migrated7.restore_preferences(bad));
+        }
+        // Physical B (bomb) is back on every page, in addition to the BACK rows.
+        {
+            VrControls b;b.bomb=true;
+            StartupMenu back_menu;
+            const auto press_b=[&] {back_menu.sample({},true);back_menu.sample(b,true);};
+            require(back_menu.page==Page::main && !back_menu.runtime);
+            press_b();require(back_menu.page==Page::main && back_menu.open); // Nothing before the game.
+            struct Route {Page page;Page parent;unsigned parent_row;};
+            for(const auto route:{Route{Page::options,Page::main,3},Route{Page::cheats,Page::options,0},
+                Route{Page::three_d,Page::options,6},Route{Page::two_d,Page::options,7},
+                Route{Page::presentation,Page::options,10},Route{Page::exit_confirmation,Page::main,5},
+                Route{Page::reset_confirmation,Page::main,5}}) {
+                back_menu.page=route.page;back_menu.selection=0;
+                const auto revision=back_menu.revision;
+                press_b();
+                require(back_menu.page==route.parent && back_menu.selection==route.parent_row
+                    && back_menu.revision!=revision && !back_menu.exit_requested && !back_menu.reset_requested);
+                // B is not a confirm and is one-shot: held B does nothing more.
+                back_menu.page=route.page;back_menu.sample(b,true);require(back_menu.page==route.page);
+            }
+            // A View short press (select_pressed) goes back too.
+            VrControls view_tap;view_tap.select=view_tap.select_pressed=true;
+            back_menu.page=Page::options;back_menu.sample(view_tap,true);require(back_menu.page==Page::main);
+            // B held while the runtime menu opens must be released first.
+            back_menu.open_runtime();back_menu.sample(b,true);require(back_menu.open);
+            press_b();require(!back_menu.open); // Runtime main page: B resumes.
+            // B only goes back; confirmation is unaffected by gameplay B/bomb.
+            back_menu.open_runtime();back_menu.page=Page::exit_confirmation;back_menu.selection=1;
+            back_menu.sample({},true);back_menu.sample(b,true);
+            require(!back_menu.exit_requested && back_menu.page==Page::main);
+            // Focus loss disarms B.
+            back_menu.page=Page::options;back_menu.sample({},true);back_menu.sample({},false);
+            back_menu.sample(b,true);require(back_menu.page==Page::options);
+        }
+        // Reset game: runtime-only main row with a confirm; no input chord.
+        {
+            StartupMenu reset_menu;
+            require(reset_menu.row_count()==6 && reset_menu.labels().back()=="QUIT TO STEAM"
+                && reset_menu.labels()[5]!="RESET GAME");
+            reset_menu.open_runtime();
+            require(reset_menu.row_count()==7 && reset_menu.labels()[4]=="RESUME"
+                && reset_menu.labels()[5]=="RESET GAME" && reset_menu.labels()[6]=="QUIT TO STEAM");
+            reset_menu.selection=5;reset_menu.sample({},true);reset_menu.sample(press,true);
+            require(reset_menu.page==Page::reset_confirmation && reset_menu.selection==0
+                && !reset_menu.reset_requested && reset_menu.title()=="RESET GAME?"
+                && reset_menu.labels()[1]=="YES / RESET GAME");
+            reset_menu.sample({},true);reset_menu.sample(press,true); // NO / BACK
+            require(reset_menu.page==Page::main && reset_menu.selection==5 && !reset_menu.reset_requested);
+            reset_menu.sample({},true);reset_menu.sample(press,true);
+            reset_menu.selection=1;reset_menu.sample({},true);reset_menu.sample(press,true);
+            require(reset_menu.reset_requested && !reset_menu.exit_requested);
+            reset_menu.reset_requested=false;
+            reset_menu.page=Page::main;reset_menu.selection=6;reset_menu.sample({},true);reset_menu.sample(press,true);
+            require(reset_menu.page==Page::exit_confirmation && reset_menu.title()=="QUIT TO STEAM?"
+                && reset_menu.labels()[1]=="YES / QUIT TO STEAM");
+            reset_menu.sample({},true);reset_menu.sample(press,true); // NO / BACK returns to the quit row.
+            require(reset_menu.page==Page::main && reset_menu.selection==6);
+        }
         // Invalid fields reject the entire record without partial mutation.
         for(size_t index=0;index<preferences.size();++index) {
             auto corrupt=preferences;corrupt[index]=255;
@@ -435,6 +528,106 @@ int main() try {
     require(input.poll(true) && input.controls().fire && !input.controls().menu_confirm);
     independent_buttons=false;button_states={};
     require(input.apply_haptics(authored)); // The advertised Frame binding is usable too.
+    {
+        // --- Haptic strength: every OpenXR output is scaled, 0 silences it.
+        input.set_haptics_strength(.5F);
+        auto applies=haptic_applies;
+        require(input.apply_haptics(authored) && haptic_applies==applies+2
+            && std::abs(haptic_amplitude-float(0x8888U)/65535.F*.5F)<.00001F && haptic_duration==40'000'000);
+        input.set_haptics_strength(.25F);
+        require(input.apply_haptics({0xFFFFU,0x0000U,40U})
+            && std::abs(haptic_amplitude-.25F)<.00001F);
+        input.set_haptics_strength(0.F);
+        applies=haptic_applies;const auto stops=haptic_stops;
+        require(input.apply_haptics(authored) && haptic_applies==applies && haptic_stops>stops);
+        input.set_haptics_strength(7.F);require(input.haptics_strength()==1.F);
+        input.set_haptics_strength(-1.F);require(input.haptics_strength()==0.F);
+        input.set_haptics_strength(std::numeric_limits<float>::quiet_NaN());require(input.haptics_strength()==.6F);
+
+        // --- System layer through the fake runtime. Frame action handles:
+        // menu 6, View 9. Time is injected, so the holds are exact.
+        independent_buttons=true;button_states={};
+        const auto view=[&](bool down) {button_states[9]=down;};
+        const auto menu_button=[&](bool down) {button_states[6]=down;};
+        const auto poll_at=[&](double at) {require(input.poll(true,at));return input.controls();};
+        require(input.poll(false,0.0));
+        poll_at(10.0); // Released: armed.
+        input.set_haptics_strength(1.F);
+
+        // Short press: nothing while down, a one-poll Select tap on release.
+        view(true);
+        auto c=poll_at(10.0);
+        require(!c.select && !c.select_pressed && c.view_down && !c.recentre_pressed);
+        view(false);c=poll_at(10.4);
+        require(c.select && c.select_pressed && !c.view_down && !c.recentre_pressed);
+        c=poll_at(10.42);require(!c.select && !c.select_pressed);
+        applies=haptic_applies;
+
+        // 1 s hold: recentre (height kept) and a 0.6 / 80 ms buzz on both hands.
+        view(true);c=poll_at(20.0);
+        c=poll_at(20.99);require(!c.recentre_pressed && haptic_applies==applies);
+        c=poll_at(21.0);
+        require(c.recentre_pressed && !c.recentre_height_pressed && !c.select && haptic_applies==applies+2
+            && std::abs(haptic_amplitude-.6F)<.00001F && haptic_duration==80'000'000 && haptic_api_valid);
+        c=poll_at(22.9);require(!c.recentre_pressed && haptic_applies==applies+2);
+        // 3 s hold: recentre + recalibrate height, buzz again.
+        c=poll_at(23.0);
+        require(c.recentre_pressed && c.recentre_height_pressed && haptic_applies==applies+4
+            && std::abs(haptic_amplitude-.6F)<.00001F && haptic_duration==80'000'000);
+        c=poll_at(30.0);require(!c.recentre_pressed && !c.recentre_height_pressed && haptic_applies==applies+4);
+        // Releasing a hold is never also a Select tap.
+        view(false);c=poll_at(30.1);require(!c.select && !c.select_pressed && !c.recentre_pressed);
+
+        // The buzz is scaled by the strength setting; 0 is silent but still recentres.
+        input.set_haptics_strength(.5F);applies=haptic_applies;
+        view(true);poll_at(40.0);c=poll_at(41.0);
+        require(c.recentre_pressed && haptic_applies==applies+2 && std::abs(haptic_amplitude-.3F)<.00001F);
+        input.set_haptics_strength(0.F);applies=haptic_applies;
+        view(false);poll_at(41.1);view(true);poll_at(42.0);c=poll_at(43.0);
+        require(c.recentre_pressed && haptic_applies==applies);
+        input.set_haptics_strength(1.F);
+        view(false);poll_at(43.1);
+
+        // A gameplay stop (menu open, rumble end) does not cut the system buzz short.
+        applies=haptic_applies;auto stopped=haptic_stops;
+        view(true);poll_at(50.0);poll_at(51.0);input.stop_haptics();
+        require(haptic_applies==applies+2 && haptic_stops==stopped);
+        view(false);poll_at(51.1);
+
+        // Menu + View held 0.5 s opens the runtime menu once; the View press is
+        // swallowed (no tap, no recentre) even when held for seconds afterwards.
+        menu_button(true);view(true);
+        c=poll_at(60.0);require(c.menu_pressed && !c.menu_chord_pressed && !c.select);
+        c=poll_at(60.49);require(!c.menu_chord_pressed);
+        c=poll_at(60.5);require(c.menu_chord_pressed && !c.recentre_pressed);
+        c=poll_at(60.6);require(!c.menu_chord_pressed);
+        menu_button(false);applies=haptic_applies;
+        c=poll_at(62.0);c=poll_at(64.0);
+        require(!c.recentre_pressed && !c.recentre_height_pressed && haptic_applies==applies);
+        view(false);c=poll_at(64.1);require(!c.select && !c.select_pressed);
+        // View first, then Menu: still the chord, never a tap.
+        view(true);poll_at(70.0);menu_button(true);c=poll_at(70.2);
+        c=poll_at(70.7);require(c.menu_chord_pressed);
+        view(false);c=poll_at(70.8);require(!c.select_pressed);
+        menu_button(false);poll_at(70.9);
+        // A short Menu + View touch (< 0.5 s) opens nothing and sends no tap.
+        menu_button(true);view(true);poll_at(80.0);
+        view(false);menu_button(false);c=poll_at(80.3);
+        require(!c.menu_chord_pressed && !c.select_pressed && !c.recentre_pressed);
+
+        // Held through focus loss: nothing fires on resume until it is released.
+        view(true);poll_at(90.0);
+        require(input.poll(false,91.0));
+        c=poll_at(92.0);require(!c.recentre_pressed && !c.select);
+        c=poll_at(95.0);require(!c.recentre_pressed && !c.recentre_height_pressed);
+        view(false);c=poll_at(95.1);require(!c.select_pressed);
+        view(true);poll_at(96.0);view(false);c=poll_at(96.2);require(c.select_pressed);
+
+        // R Menu is still the game's Start, independent of the View timing.
+        menu_button(true);c=poll_at(100.0);require(c.menu_pressed && c.menu);
+        menu_button(false);poll_at(100.1);
+        independent_buttons=false;button_states={};
+    }
     mock_profiles={XR_NULL_PATH,XR_NULL_PATH};
     const auto applies_before_unbound=haptic_applies;
     require(input.poll(true) && input.focused() && !input.haptics_available());

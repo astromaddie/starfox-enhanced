@@ -897,3 +897,9 @@ override exists yet.
 **Unchanged on purpose.** Fire/bomb/boost/brake/roll mappings. Adding trigger
 aliases for fire is a pending user decision.
 
+**Tests.** `starfox_vr_input_check` (hold timing through the fake OpenXR
+runtime with injected time, chord, B back on every page, removed chord, reset
+row, haptic scaling, v7 migration), `starfox_vr_session_check`
+(`xrRequestExitSession` sequence) and `starfox_vr_camera_check` (recentre keeps
+height). Open: on-device check of the buzz feel, hold timing, Menu + View
+discoverability, the Select-on-release latency, and the clean Quit to Steam exit.

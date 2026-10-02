@@ -127,6 +127,30 @@ int main() {
             require(!invalid.apply(bad));
             require(invalid.apply(views));close(views[0].pose.position.x,-.032F);
         }
+        {
+            // Recentre keeps standing height; recalibration (3 s hold) takes it.
+            PositionAnchor anchor;
+            std::array<XrView,2> views{};
+            views[0].pose.position={-.032F,1.7F,0.F};views[1].pose.position={.032F,1.7F,0.F};
+            require(anchor.apply(views));close(views[0].pose.position.y,0);
+            const auto moved=[&](float x,float y,float z) {
+                std::array<XrView,2> out{};
+                out[0].pose.position={x-.032F,y,z};out[1].pose.position={x+.032F,y,z};return out;
+            };
+            anchor.reset(true,true);
+            auto crouched=moved(.5F,1.2F,-1.F);require(anchor.apply(crouched));
+            close(crouched[0].pose.position.x,-.032F);close(crouched[0].pose.position.z,0);
+            close(crouched[0].pose.position.y,-.5F); // Horizontal re-centred, height kept.
+            anchor.reset(true,true);anchor.reset(true,true); // Repeated requests before apply.
+            auto again=moved(-.25F,1.2F,.5F);require(anchor.apply(again));
+            close(again[1].pose.position.x,.032F);close(again[0].pose.position.z,0);
+            close(again[0].pose.position.y,-.5F);
+            anchor.reset(true,true);anchor.reset(true,false); // Height recalibration wins.
+            auto calibrated=moved(0.F,1.2F,0.F);require(anchor.apply(calibrated));
+            close(calibrated[0].pose.position.y,0);
+            PositionAnchor first;first.reset(true,true); // Nothing to keep yet: live height.
+            auto fresh=moved(1.F,1.3F,1.F);require(first.apply(fresh));close(fresh[0].pose.position.y,0);
+        }
         XrView eye{XR_TYPE_VIEW};eye.pose.orientation.w=1;
         eye.fov={-0.7f,0.9f,0.8f,-0.6f};
         auto camera=eye_camera(eye,100,1,1000);require(camera.has_value());

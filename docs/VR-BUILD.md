@@ -1,5 +1,19 @@
 # VR development status
 
+## System layer, menus and haptics strength (October 2, 2026)
+
+Menu + Select (Frame: Menu + View, Touch/Index: both grips) now opens the
+runtime menu after a 0.5 s hold of both. Select held 1 s recentres (height
+kept) and 3 s also recalibrates height, each with a 0.6 / 80 ms buzz on both
+hands; a short Select press is reported on release. B goes back on every menu
+page. The four-input reset chord (both bumpers/triggers plus both stick
+clicks, described in older sections below) is removed; RESET GAME in the
+runtime menu replaces it. EXIT is now QUIT TO STEAM and ends the OpenXR session
+through `xrRequestExitSession`. OPTIONS > HAPTICS STRENGTH (default 60%) scales
+OpenXR haptics; preferences are version 8 (28 bytes) and migrate from v1-v7.
+Details and the open on-device checks are in `STEAM-FRAME-HANDOFF.md`
+("System layer, menus and haptics strength"). Headset acceptance pending.
+
 ## Current native Linux PCVR regression (September 23)
 
 Rebuilt the current shared worktree in the existing Ubuntu x86-64 OpenXR/Vulkan
