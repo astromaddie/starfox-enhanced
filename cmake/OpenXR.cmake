@@ -43,6 +43,19 @@ FetchContent_Declare(starfox_vulkan_headers
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
     GIT_TAG e5323cdea4ed92dfe825397f6047b8604a40423c)
 FetchContent_MakeAvailable(starfox_vulkan_headers)
+# Vendored shared sfvr C99 library (third_party/sfvr/VERSION): built for every
+# VR target (PCVR, Quest, Steam Frame) through starfox_vr_core.
+enable_language(C)
+add_library(starfox_sfvr STATIC
+    third_party/sfvr/src/sfvr_haptics.c third_party/sfvr/src/sfvr_perf.c
+    third_party/sfvr/src/sfvr_room.c third_party/sfvr/src/sfvr_settings.c
+    third_party/sfvr/src/sfvr_turn.c third_party/sfvr/src/sfvr_view.c)
+target_include_directories(starfox_sfvr PUBLIC third_party/sfvr/include)
+set_target_properties(starfox_sfvr PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+if(NOT MSVC)
+    target_link_libraries(starfox_sfvr PUBLIC m)
+endif()
 add_library(starfox_vr_core STATIC src/vr/openxr_runtime.cpp src/vr/openxr_session.cpp src/vr/openxr_swapchains.cpp src/vr/eye_camera.cpp src/vr/vulkan_device.cpp src/vr/vulkan_loader.cpp src/vr/stereo_renderer.cpp src/vr/vulkan_eye_targets.cpp)
 target_include_directories(starfox_vr_core PUBLIC include)
 target_sources(starfox_vr_core PRIVATE src/vr/vulkan_eye_commands.cpp)
@@ -64,7 +77,7 @@ target_sources(starfox_vr_core PRIVATE src/vr/openxr_input.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/scene_material.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/shape_batch.cpp src/render/face_material.cpp)
 target_compile_features(starfox_vr_core PUBLIC cxx_std_20)
-target_link_libraries(starfox_vr_core PUBLIC OpenXR::openxr_loader Vulkan::Headers PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(starfox_vr_core PUBLIC OpenXR::openxr_loader Vulkan::Headers starfox_sfvr PRIVATE ${CMAKE_DL_LIBS})
 add_library(starfox_vr_game STATIC src/vr/game_frame_driver.cpp src/vr/game_scene.cpp src/vr/draw_packet.cpp src/vr/vulkan_draw_packets.cpp src/vr/source_models.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/scene_interpolation.cpp src/vr/cockpit.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/source_span_model.cpp)
