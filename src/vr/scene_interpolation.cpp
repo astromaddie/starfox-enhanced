@@ -50,8 +50,10 @@ Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& previous,const G
 Matrix4 presentation_scene_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
     double alpha,const PresentationPreferences& preferences) {
     auto out=identity_matrix;
-    const float scale=preferences.scale();out[0]=out[5]=out[10]=scale;
-    if(!pilot_view_active(current,preferences)) return out;
+    const bool pilot=pilot_view_active(current,preferences);
+    const float scale=pilot?cockpit_world_scale(preferences):preferences.scale();
+    out[0]=out[5]=out[10]=scale;
+    if(!pilot) return out;
     const auto& now=*current.pilot_reference;
     const auto* old=previous.pilot_reference?&*previous.pilot_reference:nullptr;
     if(!std::isfinite(alpha) || !old || !previous.pilot_tracking || previous.flow!=current.flow
@@ -99,7 +101,9 @@ std::optional<SteeringMatrix> cockpit_steering_matrix(const GameSceneSnapshot& s
         source_view[c*4+r]=float(scene.view_matrix[c*3+r])/32768.F*((c==0)==(r==0)?1.F:-1.F);
     // Native steering moves on source world X/Y, not ship-local X/Y. Project
     // those axes through the same source-view/cockpit basis as world geometry.
-    const auto axes=multiply_matrix(cockpit,source_view);
+    auto axes=multiply_matrix(cockpit,source_view);
+    // Remove the cockpit's uniform world enlargement; steering needs only direction.
+    for(unsigned i:{0U,1U,4U,5U})axes[i]/=cockpit_world_scale(physical);
     const float determinant=axes[0]*axes[5]-axes[4]*axes[1];
     // The source movement plane has no unique 2D inverse when viewed edge-on.
     if(!std::isfinite(determinant) || std::abs(determinant)<1e-6F) return {};

@@ -2,7 +2,6 @@
 #include "starfox/vr/source_models.hpp"
 namespace starfox::vr {
 // Approved C presentation rig. Source geometry stays in the user's bundle.
-inline constexpr float cockpit_ship_scale=12.F;
 inline constexpr float cockpit_nose_cut_z=-.065F;
 Matrix4 cockpit_instrument_mount(bool extended=false) noexcept;
 void mount_cockpit_instruments(std::span<DrawPacket>,bool extended=false);

@@ -804,3 +804,28 @@ Delivery evidence is under `build/frame-devkit/artifacts/99712f5/`:
 readiness for launch. Natural health-ring alignment, binocular canopy fit,
 readability, steering comfort, motion/performance capture and the broader
 hardware acceptance gates remain open.
+
+## Cockpit world scale (October 2)
+
+Wearer report on Cockpit C: the world felt too small. Cause: the cabin
+encloses the live ship enlarged 12x (`cockpit_ship_scale`), but the world
+stayed at 256 units/m. The cabin's ship was therefore 12x the size of the
+in-world ship, and the eye sat 1.4 source metres behind the real ship.
+
+`presentation_scene_matrix` now uses `cockpit_world_scale()` while the pilot
+view is active: 12x the `world_scale` setting. The enlargement is centred on
+the pilot eye, so mono composition, aiming rays and angular sizes are
+unchanged. Stereo depth, head translation and parallax now treat the world as
+pilot-sized. At the default 1x setting, the native ship, its shots and the
+scenery register on the cabin's nose. Outside the cockpit (chase view, cutscenes,
+menus), the scale is unchanged. Cockpit steering divides out the enlargement,
+so direction selection and the edge-on rejection threshold are unchanged.
+
+`vr_cockpit_geometry_tests` now requires that the native ship drawn through the
+world matrix lands within 5 mm of the cabin's nose at 1x. Reverting the scale
+fails that check. Presentation, cockpit-input and cockpit-geometry checks pass
+on macOS host builds for Original and EX. The test ROMs were built in /tmp from
+the user's retail ROM.
+
+Headset-unverified. Check: overall world size, reticle depth (world sprites
+now sit 12x further away), comfort of near-miss scenery and canopy fit.

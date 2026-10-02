@@ -135,10 +135,11 @@ int main() try {
             pilot.rotation_matrix=rotations[axis];now.pilot_reference=pilot;
             auto off_rotation=presentation_scene_matrix(now,now,.5,off);
             off_rotation[12]=off_rotation[13]=off_rotation[14]=0;
-            close_matrix(off_rotation,identity_matrix);
+            auto enlarged=identity_matrix;enlarged[0]=enlarged[5]=enlarged[10]=cockpit_world_scale(off);
+            close_matrix(off_rotation,enlarged);
             const auto following=presentation_scene_matrix(now,now,.5,on);
             const auto moved=point(following,axis==2?std::array<float,4>{1,0,-4,0}:std::array<float,4>{0,0,-4,0});
-            require(std::abs(moved[axis==0?1:axis==1?0:1]-(axis==2?.5F:-2.F))<.001F,
+            require(std::abs(moved[axis==0?1:axis==1?0:1]-(axis==2?.5F:-2.F)*cockpit_world_scale(on))<.01F,
                 "Ship pitch/yaw/bank turned world in wrong direction");
             close_matrix(presentation_instrument_matrix(now,now,.5,on),identity_matrix);
             require(presentation_instrument_matrix(now,now,.5,off)!=identity_matrix,"Legacy rotating HUD changed");
@@ -155,7 +156,7 @@ int main() try {
             const auto uncalibrated=presentation_scene_matrix(now,now,.5,on);
             auto local=multiply_matrix(uncalibrated,model);
             auto expected=identity_matrix;
-            expected[0]=on.scale()/256;expected[5]=expected[10]=-on.scale()/256;
+            expected[0]=cockpit_world_scale(on)/256;expected[5]=expected[10]=-cockpit_world_scale(on)/256;
             for(unsigned i=0;i<3;++i)expected[12+i]=-cockpit_seat_m[i];
             close_matrix(local,expected,.001F);
             on.origin_x=25;on.origin_y=-15;on.origin_z=35;
@@ -166,8 +167,9 @@ int main() try {
             // Calibration uses physical metres in the rotating ship frame.
             for(unsigned i=0;i<3;++i)
                 require(std::abs(scene[12+i]-uncalibrated[12+i]-stable[12+i])<.001F,"Rotating pivot calibration scaled or changed axis");
-            const auto pivot=point(model,{.25F*256/on.scale(),
-                (.15F-cockpit_seat_m[1])*256/on.scale(),(-.35F-cockpit_seat_m[2])*256/on.scale(),1});
+            const float world=cockpit_world_scale(on);
+            const auto pivot=point(model,{.25F*256/world,
+                (.15F-cockpit_seat_m[1])*256/world,(-.35F-cockpit_seat_m[2])*256/world,1});
             const auto centered=point(scene,pivot);
             for(unsigned i=0;i<3;++i) require(std::abs(centered[i])<.001F,"Calibrated pilot pivot moved under rotation");
             // Application composes tracking on the left for every world pass.
@@ -227,8 +229,11 @@ int main() try {
         require(presentation_scene_matrix(before,now,.5,preferences)==identity_matrix,"Default camera changed");
         preferences.cockpit=true;
         const auto cockpit=presentation_scene_matrix(before,now,.5,preferences);
-        require(std::abs(cockpit[12]+1)<.001F && std::abs(cockpit[13]-(.5F-cockpit_seat_m[1]))<.001F
-            && std::abs(cockpit[14]-(4-cockpit_seat_m[2]))<.001F,"Pilot reference not in source view space");
+        const float ship=cockpit_ship_scale;
+        // Q15 rounding scales with the enlarged world.
+        require(std::abs(cockpit[12]+ship)<.001F*ship && std::abs(cockpit[13]-(.5F*ship-cockpit_seat_m[1]))<.001F*ship
+            && std::abs(cockpit[14]-(4*ship-cockpit_seat_m[2]))<.001F*ship,"Pilot reference not in ship-scaled source view space");
+        require(cockpit[0]==ship && cockpit[5]==ship && cockpit[10]==ship,"Cockpit world not enlarged to the cabin's ship");
         preferences.origin_x=25;
         const auto offset=presentation_scene_matrix(before,now,.5,preferences);
         require(std::abs(offset[12]-cockpit[12]+.25F)<.001F,"Calibrated origin changed wrong axis");
@@ -247,7 +252,7 @@ int main() try {
         require(presentation_scene_matrix(before,now,.5,preferences)==identity_matrix,"Missing pilot reference invented");
         preferences.world_scale=5;
         const auto scaled=presentation_scene_matrix(before,now,.5,preferences);
-        require(scaled[0]==2 && scaled[5]==2 && scaled[10]==2,"World scale missing");
+        require(scaled[0]==2 && scaled[5]==2 && scaled[10]==2,"World scale missing outside the cockpit");
         for(bool ex:{false,true}) {
             const auto layout=layout_a_hud(ex);
             const int label_y=(ex?186:183)+layout[render::HudElement::shield].y;

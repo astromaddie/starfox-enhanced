@@ -25,6 +25,13 @@ inline Matrix4 multiply_matrix(const Matrix4& a,const Matrix4& b) noexcept {
 }
 // Approved C base seat in the scaled ship reference; saved offsets remain additive.
 inline constexpr std::array<float,3> cockpit_seat_m{0.F,.28F,1.4F};
+// The cabin encloses the live ship enlarged to pilot size. The world shares
+// that enlargement so the native ship, its shots and the scenery match the
+// cabin; world_scale stays a multiplier on top.
+inline constexpr float cockpit_ship_scale=12.F;
+inline float cockpit_world_scale(const PresentationPreferences& preferences) noexcept {
+    return preferences.scale()*cockpit_ship_scale;
+}
 inline constexpr float interface_panel_distance=1.75F;
 inline constexpr float interface_panel_width=1.15F;
 // Initial comfort value, pending wearer calibration. Keep the original angular size.

@@ -219,12 +219,15 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
             const auto check_stream=[&](auto from,auto to) {for(size_t i=0;i<from.size();++i) {
                 const float pilot[]{from[i].position[0]/256,-from[i].position[1]/256,-from[i].position[2]/256};
                 const auto registered=point(camera,pilot),displayed=point(multiply_matrix(rig,expected.model),to[i].position);
-                const float unscaled[]{pilot[0]*calibrated.scale()-cockpit_seat_m[0],
-                    pilot[1]*calibrated.scale()-cockpit_seat_m[1],pilot[2]*calibrated.scale()-cockpit_seat_m[2]};
+                const float world=cockpit_world_scale(calibrated);
+                const float unscaled[]{pilot[0]*world-cockpit_seat_m[0],
+                    pilot[1]*world-cockpit_seat_m[1],pilot[2]*world-cockpit_seat_m[2]};
                 const auto authored=point(native_camera,from[i].position),attached_reference=point(rig,unscaled);
                 for(unsigned axis=0;axis<3;++axis) {
                     near(registered[axis],displayed[axis]);
                     require(std::abs(authored[axis]-attached_reference[axis])<.005F);
+                    // At default world scale the native ship lands exactly on the cabin's ship.
+                    if(scale==0)require(std::abs(authored[axis]-registered[axis])<.005F);
                 }
                 for(unsigned c=0;c<4;++c)near(from[i].color[c],to[i].color[c]);
             }};
