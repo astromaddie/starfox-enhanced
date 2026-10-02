@@ -38,6 +38,7 @@
 #include "starfox/vr/startup_menu.hpp"
 #include "starfox/vr/perf_log.hpp"
 #include "starfox/vr/env_overrides.hpp"
+#include "starfox/vr/refresh_rate.hpp"
 #include "starfox/state/files.hpp"
 #include "starfox/vr/pcm_output.hpp"
 #include "starfox/audio/spc700_audio.hpp"
@@ -809,6 +810,11 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     auto last_profile=std::chrono::steady_clock::now();
     std::optional<std::chrono::steady_clock::time_point> exit_requested_at;
     starfox::vr::PerfLog perf_log;
+    // XR_FB_display_refresh_rate: request once the session runs (default 90 Hz,
+    // SFX_VR_REFRESH_RATE overrides), drop to 72 after two low focused windows.
+    starfox::vr::RefreshRate refresh_rate(runtime.supports_display_refresh_rate()
+        ?starfox::vr::RefreshApi::from_instance(runtime.instance()):starfox::vr::RefreshApi{});
+    bool refresh_rate_requested=false;
     std::optional<XrTime> perf_last_display_time;
     FrameWait frame_wait;
     while((!host.frame_limit || submitted<host.frame_limit)
@@ -826,6 +832,17 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             } else if(session.exit_requested() || now-*exit_requested_at>std::chrono::seconds(2)) {
                 cancelled=true;break;
             }
+        }
+        if(!refresh_rate_requested && session.running()) {
+            refresh_rate_requested=true;
+            const float target=starfox::vr::env_override_float("refresh_rate")
+                .value_or(starfox::vr::RefreshRate::default_target);
+            if(refresh_rate.request(session.handle(),target)) {
+                std::cout<<"[vr] display refresh offered:";
+                for(const float rate:refresh_rate.offered()) std::cout<<' '<<rate;
+                std::cout<<"; target "<<target<<", requested "<<*refresh_rate.requested()
+                    <<", current "<<*refresh_rate.current()<<" Hz\n";
+            } else std::cout<<"[vr] display refresh request skipped: "<<refresh_rate.status()<<'\n';
         }
         renderer.set_head_translation(startup.presentation.translation_scale());
         const auto result=renderer.step_async([&](unsigned eye,uint32_t image,const auto& tracking_camera,XrTime time) {
@@ -1676,6 +1693,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     frame.gpu_ms[eye_index]=eye_frame_profile[eye_index]->gpu_timestamp_ms;
                 }
                 perf_log.add_frame(now_s,frame);
+                if(const auto fallback=refresh_rate.observe(now_s,session.state()==XR_SESSION_STATE_FOCUSED)) {
+                    std::cout<<"[vr] display refresh below 90% for two 10 s windows; requesting "<<*fallback<<" Hz: "
+                        <<(refresh_rate.request(session.handle(),*fallback)?"ok":refresh_rate.status())<<'\n';
+                }
                 if(const auto line=perf_log.poll(now_s)) std::cout<<*line<<std::endl;
             }
             if(profile_csv.enabled()) {

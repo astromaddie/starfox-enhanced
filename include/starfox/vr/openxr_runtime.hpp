@@ -23,11 +23,14 @@ public:
     bool supports_frame_controller_interaction() const noexcept {
         return frame_controller_interaction_;
     }
+    // XR_FB_display_refresh_rate was advertised and enabled on the instance.
+    bool supports_display_refresh_rate() const noexcept {return display_refresh_rate_;}
 private:
     XrInstance instance_{XR_NULL_HANDLE};
     XrSystemId system_{XR_NULL_SYSTEM_ID};
     bool vulkan_{};
     bool frame_controller_interaction_{};
+    bool display_refresh_rate_{};
     std::vector<XrViewConfigurationView> views_;
     std::string status_{"OpenXR not initialized"};
 };

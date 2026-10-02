@@ -942,3 +942,18 @@ range. An override wins over the saved preference and is never written to
 
 No other registry key is implemented by this port, so no other variable has any
 effect.
+
+**Display refresh rate.** When `XR_FB_display_refresh_rate` is advertised the
+runtime enables it, and once the session is running the application
+(`include/starfox/vr/refresh_rate.hpp`) enumerates the offered rates and
+requests the highest one at or below the target: 90 Hz by default, or
+`SFX_VR_REFRESH_RATE` (72-144). If nothing offered is at or below the target it
+takes the lowest offered rate. The log line is `[vr] display refresh offered: ...`.
+If the focused frame rate stays under 90% of the current rate for two
+consecutive 10 s windows, it requests 72 Hz once and stays there for the
+session; a window with any unfocused frame resets the streak, and there is no
+automatic return to 90. The current rate is re-read from the runtime at each
+window end. This is in addition to the `vrpreferences.json` rate, which is
+unchanged. Without the extension nothing is requested and the log says so.
+Untested on a device: the Steam Frame runtime's offered rates and whether it
+honours the request are not known.

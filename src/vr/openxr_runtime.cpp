@@ -23,7 +23,7 @@ OpenXrRuntime::~OpenXrRuntime() {if(instance_!=XR_NULL_HANDLE) xrDestroyInstance
 bool OpenXrRuntime::initialize(const AndroidXrContext* android) {
     if(instance_!=XR_NULL_HANDLE) {xrDestroyInstance(instance_);instance_=XR_NULL_HANDLE;}
     system_=XR_NULL_SYSTEM_ID;views_.clear();vulkan_=false;
-    frame_controller_interaction_=false;
+    frame_controller_interaction_=false;display_refresh_rate_=false;
     try {
 #if defined(__ANDROID__)
         if(!android || !android->java_vm || !android->application_context || !android->activity)
@@ -50,7 +50,11 @@ bool OpenXrRuntime::initialize(const AndroidXrContext* android) {
                 return std::strcmp(extension.extensionName,
                     "XR_VALVE_frame_controller_interaction")==0;
             });
+        display_refresh_rate_=std::any_of(extensions.begin(),extensions.end(),[](const auto& extension) {
+            return std::strcmp(extension.extensionName,XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME)==0;
+        });
         std::vector<const char*> enabled_extensions{"XR_KHR_vulkan_enable2"};
+        if(display_refresh_rate_) enabled_extensions.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
         if(!vulkan_) throw std::runtime_error("OpenXR runtime lacks XR_KHR_vulkan_enable2");
         if(frame_controller_interaction_)
             enabled_extensions.push_back("XR_VALVE_frame_controller_interaction");
@@ -84,7 +88,7 @@ bool OpenXrRuntime::initialize(const AndroidXrContext* android) {
         status_=error.what();
         if(instance_!=XR_NULL_HANDLE) {xrDestroyInstance(instance_);instance_=XR_NULL_HANDLE;}
         system_=XR_NULL_SYSTEM_ID;views_.clear();vulkan_=false;
-        frame_controller_interaction_=false;return false;
+        frame_controller_interaction_=false;display_refresh_rate_=false;return false;
     }
 }
 }
