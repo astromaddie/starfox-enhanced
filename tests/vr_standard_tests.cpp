@@ -1,6 +1,10 @@
 // Units that implement the cross-port Steam Frame VR standard on top of the
 // vendored sfvr library: the [vr-perf] line, env overrides and refresh rate.
+#include "starfox/vr/env_overrides.hpp"
 #include "starfox/vr/perf_log.hpp"
+#include "starfox/vr/startup_menu.hpp"
+#include <cstring>
+#include <map>
 #include <iostream>
 #include <source_location>
 #include <stdexcept>
@@ -34,8 +38,51 @@ void perf_line() {
     // A stalled window still reports: a stall is data.
     require(partial.poll(20.0)->starts_with("[vr-perf] fps=0.0"));
 }
+std::map<std::string,std::string> fake_env;
+const char* fake_getenv(const char* name) {
+    const auto found=fake_env.find(name);
+    return found==fake_env.end()?nullptr:found->second.c_str();
+}
+void env_overrides() {
+    fake_env.clear();
+    require(!env_override_float("haptics",fake_getenv)); // Unset.
+    fake_env["SFX_VR_HAPTICS"]="0.25";
+    require(env_override_float("haptics",fake_getenv)==.25F);
+    fake_env["SFX_VR_HAPTICS"]=" 0.8 ";
+    require(env_override_float("haptics",fake_getenv)==.8F); // Whitespace ignored.
+    fake_env["SFX_VR_HAPTICS"]="7";
+    require(env_override_float("haptics",fake_getenv)==1.F); // Clamped to the registry range.
+    fake_env["SFX_VR_HAPTICS"]="-1";
+    require(env_override_float("haptics",fake_getenv)==0.F);
+    for(const char* bad:{"","  ","loud","0.5x","nan","inf"}) {
+        fake_env["SFX_VR_HAPTICS"]=bad;
+        require(!env_override_float("haptics",fake_getenv));
+    }
+    fake_env["SFX_VR_TIMING_GPU"]="on";
+    require(env_override_bool("timing_gpu",fake_getenv)==true);
+    fake_env["SFX_VR_TIMING_GPU"]="0";
+    require(env_override_bool("timing_gpu",fake_getenv)==false);
+    fake_env["SFX_VR_TIMING_GPU"]="maybe";
+    require(!env_override_bool("timing_gpu",fake_getenv));
+    fake_env["SFX_VR_REFRESH_RATE"]="500";
+    require(env_override_float("refresh_rate",fake_getenv)==144.F);
+    // The variable name is the standard SFX_VR_<KEY>, from sfvr_settings_env_name.
+    char name[64];
+    require(sfvr_settings_env_name("SFX","haptics",name,sizeof name) && std::strcmp(name,"SFX_VR_HAPTICS")==0);
+    // The menu: the override wins, is shown, and is never saved.
+    StartupMenu menu;
+    require(menu.haptics_strength()==.6F);
+    menu.haptics_override=.3F;
+    require(menu.haptics_strength()==.3F);
+    menu.page=StartupMenu::Page::options;
+    require(menu.labels()[9]=="HAPTICS STRENGTH: 30% ENV");
+    require(menu.preferences()[27]==60);
+    menu.haptics_override.reset();
+    require(menu.labels()[9]=="HAPTICS STRENGTH: 60%");
+}
 }
 int main() try {
     perf_line();
-    std::cout<<"VR standard units passed (perf line)\n";
+    env_overrides();
+    std::cout<<"VR standard units passed (perf line, env overrides)\n";
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

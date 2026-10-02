@@ -37,6 +37,7 @@
 #include "starfox/vr/game_frame_driver.hpp"
 #include "starfox/vr/startup_menu.hpp"
 #include "starfox/vr/perf_log.hpp"
+#include "starfox/vr/env_overrides.hpp"
 #include "starfox/state/files.hpp"
 #include "starfox/vr/pcm_output.hpp"
 #include "starfox/audio/spc700_audio.hpp"
@@ -662,7 +663,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     }
     starfox::vr::VulkanEyeCommands commands;
     if(live && !live->output.open()) {std::cerr<<live->output.status()<<'\n';return 8;}
-    const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled()
+    const bool timing_gpu=starfox::vr::env_override_bool("timing_gpu").value_or(false);
+    const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled() || timing_gpu
         ?std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig>(
             starfox::vr::VulkanEyeCommands::TimestampConfig{
                 device.timestamp_valid_bits(),device.timestamp_period_ns()})
@@ -739,6 +741,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::Matrix4 presentation_transform=starfox::vr::identity_matrix;
     starfox::vr::Matrix4 instrument_transform=starfox::vr::identity_matrix;
     starfox::vr::StartupMenu startup;
+    startup.haptics_override=starfox::vr::env_override_float("haptics");
+    if(startup.haptics_override) std::cout<<"[vr] haptics strength overridden by SFX_VR_HAPTICS: "<<*startup.haptics_override<<'\n';
     startup.ray_tracing_available=ray_supported;startup.ray_tracing=ray_tracing;
     starfox::vr::VulkanScenePipeline circle_pipeline;
     starfox::vr::VulkanSceneBuffer circle_vertices;

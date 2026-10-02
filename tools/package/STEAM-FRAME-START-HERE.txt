@@ -38,6 +38,10 @@ RESET GAME (runtime menu, with a confirm) restarts at the start menu and keeps
 saves. QUIT TO STEAM, then YES / QUIT TO STEAM, ends the session and exits;
 NO / BACK returns.
 
+Optional environment overrides (set before launch, not saved): SFX_VR_HAPTICS
+(0 to 1 haptics strength), SFX_VR_TIMING_GPU (1 enables GPU timing in the
+[vr-perf] log line) and SFX_VR_REFRESH_RATE (target Hz, default 90).
+
 No ROM, generated BIN, private music, saves, or keys are included or should be
 redistributed with this package. Physical headset startup, tracking, controller
 input, comfort, and sustained performance still require Steam Frame testing.

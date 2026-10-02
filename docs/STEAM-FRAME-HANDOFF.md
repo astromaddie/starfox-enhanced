@@ -896,8 +896,8 @@ haptic output goes through one `sfvr_haptic_queue`: rumble is queued with
 longest duration, per hand) once per frame, scaled by the setting. Preferences
 are version 8, 28 bytes: the v7 record plus one byte, percent 0-100. Versions
 1-7 migrate unchanged with 60%, and a v8 byte above 100 rejects the record, like
-the other fields. The standard's `haptics` key maps to this byte; no env
-override exists yet.
+the other fields. The standard's `haptics` key maps to this byte; the env
+override is below.
 
 **Unchanged on purpose.** Fire/bomb/boost/brake/roll mappings. Adding trigger
 aliases for fire is a pending user decision.
@@ -926,3 +926,19 @@ whose display time jumped more than 1.5 runtime display periods. Unmeasured
 values count as zero. `gpu` is the left plus right eye GPU timestamp
 milliseconds, or `n/a` when timestamps are off (see below). The CPU timings are
 now always measured, not only with `--profile-csv`.
+
+**Env overrides.** The standard form `SFX_VR_<KEY>` (name built with
+`sfvr_settings_env_name("SFX", key)`, canonical snake_case keys from the sfvr
+registry) is read at startup by `include/starfox/vr/env_overrides.hpp`. An
+unset, empty or unparseable variable is ignored; numbers clamp to the registry
+range. An override wins over the saved preference and is never written to
+`vr-preferences.bin`. Implemented keys:
+
+| Variable | Meaning |
+| --- | --- |
+| `SFX_VR_HAPTICS` | Haptics strength 0..1 (default from the saved setting, 0.6). The menu row shows `NN% ENV` while it is set, and changing it there has no effect |
+| `SFX_VR_TIMING_GPU` | `1`/`true`/`on` enables GPU timestamp queries, which fills `gpu=` in `[vr-perf]`; default off (also on with `--profile-csv`) |
+| `SFX_VR_REFRESH_RATE` | Target display refresh in Hz, default 90 (added with the refresh-rate request) |
+
+No other registry key is implemented by this port, so no other variable has any
+effect.

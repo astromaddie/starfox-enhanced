@@ -6,6 +6,7 @@
 #include "starfox/render/effect_types.hpp"
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 #include <span>
@@ -51,7 +52,11 @@ public:
     unsigned steer_sensitivity_index{};
     // OpenXR haptic strength, percent (0..100, default 60 = 0.6).
     unsigned haptics_percent{60};
-    float haptics_strength() const noexcept {return float(std::min(haptics_percent,100U))/100.F;}
+    // SFX_VR_HAPTICS (0..1) wins over the saved percent and is never saved.
+    std::optional<float> haptics_override;
+    float haptics_strength() const noexcept {
+        return haptics_override?*haptics_override:float(std::min(haptics_percent,100U))/100.F;
+    }
     static constexpr std::array<unsigned,5> steer_sensitivities{100,40,55,70,85};
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
@@ -276,7 +281,8 @@ public:
             "MUSIC VOLUME: "+std::to_string(music_volume)+"%","SFX VOLUME: "+std::to_string(sfx_volume)+"%",
             std::string("LANGUAGE: ")+languages[language<6?language:0],"3D OPTIONS","2D OPTIONS",
             "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%",
-            "HAPTICS STRENGTH: "+std::to_string(std::min(haptics_percent,100U))+"%","VR PRESENTATION","BACK"};
+            "HAPTICS STRENGTH: "+(haptics_override?std::to_string(int(*haptics_override*100.F+.5F))+"% ENV"
+                :std::to_string(std::min(haptics_percent,100U))+"%"),"VR PRESENTATION","BACK"};
         std::vector<std::string> rows{std::string("EXPERIENCE: ")+(extended?"STARFOX EX":"ORIGINAL")+(runtime?" (LOCKED)":alternate_available?"":" (ONLY)"),
             std::string("PACE/SPEED: ")+(unlocked_pace?"UNLOCKED 20 HZ":"ORIGINAL"),
             std::string("MSU-1 MUSIC: ")+(msu_available?(msu_music?"ON":"OFF"):"NOT FOUND"),
