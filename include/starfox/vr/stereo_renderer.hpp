@@ -36,6 +36,8 @@ public:
     Result step_async(const AsyncDrawEye&,float units_per_metre,float near_plane,
         std::optional<float> far_plane=std::nullopt,const Composition& composition={});
     bool frame_pending() const noexcept {return frame_.has_value();}
+    // The runtime's predicted display period for the most recent frame begun (ns; 0 before any).
+    XrDuration display_period() const noexcept {return display_period_;}
     bool teardown_required() const noexcept {return fatal_;}
     XrPosef anchored_pose(XrPosef pose) const noexcept {return anchor_position_?position_anchor_.anchored(pose):pose;}
 private:
@@ -45,6 +47,7 @@ private:
     std::array<EyeCamera,2> cameras_{};
     unsigned next_eye_{};
     bool cancelling_{};
+    XrDuration display_period_{};
     bool fatal_{};
     bool anchor_position_{};
     bool recenter_pending_{},recenter_height_pending_{};float head_translation_{1.F};

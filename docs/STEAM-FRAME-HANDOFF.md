@@ -908,3 +908,21 @@ row, haptic scaling, v7 migration), `starfox_vr_session_check`
 (`xrRequestExitSession` sequence) and `starfox_vr_camera_check` (recentre keeps
 height). Open: on-device check of the buzz feel, hold timing, Menu + View
 discoverability, the Select-on-release latency, and the clean Quit to Steam exit.
+
+## sfvr adoption: perf line, env overrides, refresh rate (October 2)
+
+**Headset acceptance pending.** Covered by unit tests and host builds only.
+`third_party/sfvr` is the vendored shared C99 library (`VERSION` holds its
+commit; never edit it here). The View timing and haptic queue above use it.
+
+**`[vr-perf]` line.** Every 10 s the application prints one standard line to
+stdout, formatted by `sfvr_perf` (`include/starfox/vr/perf_log.hpp`), for
+example `[vr-perf] fps=89.9 missed=2 cpu=6.10ms logic=1.20 model=2.40 upload=1.30
+layer=1.20 eye=2.21/2.19ms gpu=n/a`. It is added at each submitted stereo frame,
+beside `--profile-csv`, which is unchanged. The stages are the existing
+per-frame profile timings (logic, model assembly, upload, layer composition);
+`eye` is each eye's CPU submit-to-fence milliseconds; `missed` counts frames
+whose display time jumped more than 1.5 runtime display periods. Unmeasured
+values count as zero. `gpu` is the left plus right eye GPU timestamp
+milliseconds, or `n/a` when timestamps are off (see below). The CPU timings are
+now always measured, not only with `--profile-csv`.

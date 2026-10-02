@@ -193,6 +193,8 @@ if(NOT ANDROID)
     endif()
     add_executable(starfox_vr_input_check tests/openxr_input_tests.cpp)
     target_link_libraries(starfox_vr_input_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_standard_check tests/vr_standard_tests.cpp)
+    target_link_libraries(starfox_vr_standard_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_cockpit_geometry_check tests/vr_cockpit_geometry_tests.cpp)
     target_link_libraries(starfox_vr_cockpit_geometry_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_cockpit_input_check tests/vr_cockpit_input_tests.cpp)
@@ -269,7 +271,7 @@ if(NOT ANDROID)
         # Keep hardware runtime/scene probes separate from unattended CTest.
         foreach(vr_check IN ITEMS
             starfox_vr_application_tests starfox_vr_runtime_tests
-            starfox_vr_audio_check starfox_vr_input_check
+            starfox_vr_audio_check starfox_vr_input_check starfox_vr_standard_check
             starfox_vr_packet_check starfox_vr_decal_check starfox_vr_cockpit_input_check starfox_vr_cockpit_geometry_check starfox_vr_cache_check
             starfox_vr_session_check starfox_vr_swapchain_check
             starfox_vr_camera_check starfox_vr_device_check

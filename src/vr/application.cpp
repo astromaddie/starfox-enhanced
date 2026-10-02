@@ -36,6 +36,7 @@
 #include "starfox/vr/background_tiles.hpp"
 #include "starfox/vr/game_frame_driver.hpp"
 #include "starfox/vr/startup_menu.hpp"
+#include "starfox/vr/perf_log.hpp"
 #include "starfox/state/files.hpp"
 #include "starfox/vr/pcm_output.hpp"
 #include "starfox/audio/spc700_audio.hpp"
@@ -803,6 +804,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     std::optional<unsigned> startup_revision;
     auto last_profile=std::chrono::steady_clock::now();
     std::optional<std::chrono::steady_clock::time_point> exit_requested_at;
+    starfox::vr::PerfLog perf_log;
+    std::optional<XrTime> perf_last_display_time;
     FrameWait frame_wait;
     while((!host.frame_limit || submitted<host.frame_limit)
           && (host.time_limit.count()==0 || std::chrono::steady_clock::now()-started<host.time_limit)
@@ -1436,7 +1439,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         if(!backgrounds.update_models(model_updates)) throw std::runtime_error("Intro planet motion update failed");
                     }
                     const auto profile_end=std::chrono::steady_clock::now();
-                    if(profile_csv.enabled()) {
+                    {   // Always measured: feeds the [vr-perf] line as well as --profile-csv.
                         const auto ms=[](auto a,auto b) {return std::chrono::duration<double,std::milli>(b-a).count();};
                         cpu_frame_profile.logic_ms=ms(profile_start,profile_logic);
                         cpu_frame_profile.models_ms=ms(profile_logic,profile_models);
@@ -1587,7 +1590,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             },[&](VkCommandBuffer command,VkExtent2D,const auto&,XrTime) {
                 if(ray_ready && !ray_frames[eye]->record_release(command)) throw std::runtime_error("Ray shadow release failed");
             },ray_ready?&ray_wait:nullptr);
-            if(profile_csv.enabled() && eye_result==StereoRenderer::EyeResult::complete && eye<eye_frame_profile.size())
+            if(eye_result==StereoRenderer::EyeResult::complete && eye<eye_frame_profile.size())
                 eye_frame_profile[eye]=draw.take_last_eye_timing();
             if(eye_result==StereoRenderer::EyeResult::complete && eye<2 && ray_frames[eye]
                 && ray_frames[eye]->state()==VulkanDxrFrame::State::ready) ray_frames[eye]->retire();
@@ -1653,6 +1656,24 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         }
         if(result==Result::submitted) {
             ++submitted;
+            {
+                // Standard [vr-perf] line every 10 s (sfvr_perf), beside --profile-csv.
+                // A frame is missed when its display time jumped past 1.5 periods.
+                const double now_s=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+                starfox::vr::PerfLog::Frame frame;
+                const auto period=renderer.display_period();
+                frame.missed=input_time && perf_last_display_time && period>0
+                    && *input_time-*perf_last_display_time>period+period/2;
+                if(input_time) perf_last_display_time=*input_time;
+                frame.logic_ms=cpu_frame_profile.logic_ms;frame.model_ms=cpu_frame_profile.models_ms;
+                frame.upload_ms=cpu_frame_profile.upload_ms;frame.layer_ms=cpu_frame_profile.layers_ms;
+                for(unsigned eye_index=0;eye_index<2;++eye_index) if(eye_frame_profile[eye_index]) {
+                    frame.eye_ms[eye_index]=eye_frame_profile[eye_index]->submit_to_fence_cpu_ms;
+                    frame.gpu_ms[eye_index]=eye_frame_profile[eye_index]->gpu_timestamp_ms;
+                }
+                perf_log.add_frame(now_s,frame);
+                if(const auto line=perf_log.poll(now_s)) std::cout<<*line<<std::endl;
+            }
             if(profile_csv.enabled()) {
                 const auto now=std::chrono::steady_clock::now();
                 const auto wall_ms=std::chrono::duration<double,std::milli>(now-started).count();
