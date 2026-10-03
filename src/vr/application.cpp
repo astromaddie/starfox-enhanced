@@ -544,14 +544,24 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         VK_FORMAT_R8G8B8A8_UNORM,VK_FORMAT_B8G8R8A8_UNORM};
     // SFX_VR_RESOLUTION_SCALE (0.5-1): eye buffers at a fraction of the
     // runtime's recommended size, to measure how GPU time follows pixel count.
+    // RENDER RESOLUTION, read from the saved preferences before the menu exists.
     auto eye_views=runtime.views();
-    const auto resolution_scale=starfox::vr::env_override_float("resolution_scale");
-    if(resolution_scale && *resolution_scale>=.5F && *resolution_scale<1.F) for(auto& view:eye_views) {
-        view.recommendedImageRectWidth=std::max(64U,uint32_t(std::lround(view.recommendedImageRectWidth**resolution_scale))&~3U);
-        view.recommendedImageRectHeight=std::max(64U,uint32_t(std::lround(view.recommendedImageRectHeight**resolution_scale))&~3U);
+    const auto resolution_env=starfox::vr::env_override_float("resolution_scale");
+    const auto resolution_override=resolution_env && *resolution_env>=.5F && *resolution_env<=1.F?resolution_env:std::nullopt;
+    float resolution_scale=1.F;
+    if(resolution_override) resolution_scale=*resolution_override;
+    else if(!host.cartridge_save_path.empty()) try {
+        const auto saved_path=host.cartridge_save_path.parent_path()/"vr-preferences.bin";
+        starfox::vr::StartupMenu saved;
+        if(std::filesystem::exists(saved_path) && saved.restore_preferences(starfox::state::read_file(saved_path)))
+            resolution_scale=saved.resolution_scale();
+    } catch(const std::exception&) {}
+    if(resolution_scale<1.F) for(auto& view:eye_views) {
+        view.recommendedImageRectWidth=std::max(64U,uint32_t(std::lround(view.recommendedImageRectWidth*resolution_scale))&~3U);
+        view.recommendedImageRectHeight=std::max(64U,uint32_t(std::lround(view.recommendedImageRectHeight*resolution_scale))&~3U);
     }
     std::cout<<"[vr] eye buffers "<<eye_views[0].recommendedImageRectWidth<<'x'<<eye_views[0].recommendedImageRectHeight
-        <<(resolution_scale?" (SFX_VR_RESOLUTION_SCALE)":"")<<'\n';
+        <<(resolution_override?" (SFX_VR_RESOLUTION_SCALE)":"")<<'\n';
     if(!swapchains.initialize(session.handle(),eye_views,formats)) {
         std::cerr<<swapchains.status()<<'\n';return 6;
     }
@@ -756,6 +766,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::StartupMenu startup;
     startup.haptics_override=starfox::vr::env_override_float("haptics");
     startup.refresh_override=starfox::vr::env_override_float("refresh_rate");
+    startup.resolution_override=resolution_override;startup.active_resolution=resolution_scale;
     if(startup.haptics_override) std::cout<<"[vr] haptics strength overridden by SFX_VR_HAPTICS: "<<*startup.haptics_override<<'\n';
     const auto diagnostics=starfox::vr::diagnostic_overrides();
     session.set_force_render(diagnostics.force_render);
@@ -813,8 +824,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         if(session_file) session_file<<line<<std::endl;
     };
     if(diagnostics.active()) session_log(diagnostics.describe());
-    if(resolution_scale) session_log("[vr] eye buffers "+std::to_string(eye_extents[0].width)+"x"
-        +std::to_string(eye_extents[0].height)+" (SFX_VR_RESOLUTION_SCALE="+std::to_string(*resolution_scale)+")");
+    session_log("[vr] eye buffers "+std::to_string(eye_extents[0].width)+"x"+std::to_string(eye_extents[0].height)
+        +" ("+std::to_string(int(resolution_scale*100.F+.5F))+"%"+(resolution_override?", SFX_VR_RESOLUTION_SCALE)":")"));
     std::optional<unsigned> autostart_level;
     if(diagnostics.autostart) {
         if(startup.open) autostart_level=startup.level_choice(*diagnostics.autostart,initial_extended);
@@ -824,7 +835,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     if(startup.open && !preferences_path.empty()) try {
         if(std::filesystem::exists(preferences_path)) {
             const auto size=std::filesystem::file_size(preferences_path);
-            if((size!=16 && size!=20 && size!=26 && size!=27 && size!=28 && size!=29)
+            if((size!=16 && size!=20 && size!=26 && size!=27 && size!=28 && size!=29 && size!=30)
                 || !startup.restore_preferences(starfox::state::read_file(preferences_path)))
                 std::cerr<<"Invalid VR preferences; using defaults\n";
         }

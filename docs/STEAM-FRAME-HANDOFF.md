@@ -1310,3 +1310,25 @@ forced, and the run exited on time. Log: `build/frame-devkit/runs/11ad19b-forced
   still needed.
 - `SFX_VR_RESOLUTION_SCALE` was added to measure how GPU time follows eye-buffer
   size (2160x2160 by default, from `preferResolution` in `vrpreferences.json`).
+
+### Resolution comparison and RENDER RESOLUTION setting (October 4)
+
+`6df05f1` was run unattended twice on LEVEL1_1 at 90 Hz (forced render, 90 s each).
+Logs: `build/frame-devkit/runs/6df05f1-forced-LEVEL1_1-90hz-scale{1.00,0.75}.log`.
+
+| Eye buffers | GPU per frame (both eyes) | fps | Missed per 10 s window |
+| --- | --- | --- | --- |
+| 2160x2160 (100%) | 11.4–16.2 ms | 45 (half rate) after 30 s | 0–2 at half rate |
+| 1512x1512 (75%) | 6.9–10.6 ms | 59–90, mostly 81–90 | 0–75, rising in heavier scenes |
+
+GPU time follows pixel count closely: 56% of the pixels gave about 64% of the GPU
+time. At 75% the run held 90 fps in lighter stretches but still missed frames
+when GPU time reached 9–10.6 ms. Holding 90 Hz throughout will need about 70%,
+or shader work. CPU stayed at 1–2 ms. Standby may lower GPU clocks, so worn
+numbers may be better.
+
+VR PRESENTATION now has RENDER RESOLUTION: 100% (default), 90%, 80% or 75%, saved
+as preferences v10 (byte 29; v1–v9 load as 100%). Eye buffers are created at
+launch, so the application reads the saved choice before creating swapchains, and
+the row shows NEXT LAUNCH until a relaunch applies it.
+`SFX_VR_RESOLUTION_SCALE` (0.5–1) overrides it and shows as "<n>% ENV".

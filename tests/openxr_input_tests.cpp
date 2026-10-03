@@ -297,7 +297,7 @@ int main() try {
         StartupMenu presentation_menu;presentation_menu.page=Page::presentation;
         presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.presentation.cockpit && !presentation_menu.presentation.follow_ship_rotation);
-        require(presentation_menu.row_count()==10 && presentation_menu.labels()[1]=="FOLLOW SHIP ROTATION: OFF");
+        require(presentation_menu.row_count()==11 && presentation_menu.labels()[1]=="FOLLOW SHIP ROTATION: OFF");
         presentation_menu.selection=1;presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.presentation.follow_ship_rotation && presentation_menu.labels()[1]=="FOLLOW SHIP ROTATION: ON");
         require(migrated.restore_preferences(presentation_menu.preferences()) && migrated.presentation.follow_ship_rotation);
@@ -305,7 +305,7 @@ int main() try {
         require(migrated.restore_preferences(std::span(version6).first(26)) && migrated.presentation.cockpit
             && !migrated.presentation.follow_ship_rotation);
         require(!migrated.restore_preferences(version6)); // Version and size must agree.
-        require(presentation_menu.preferences()[4]==9 && presentation_menu.preferences().size()==29);
+        require(presentation_menu.preferences()[4]==10 && presentation_menu.preferences().size()==30);
         // REFRESH RATE: 90 Hz default, 120 Hz, then the system setting; saved in v9.
         require(presentation_menu.labels()[8]=="REFRESH RATE: 90 HZ" && presentation_menu.refresh_target()==90.F);
         presentation_menu.selection=8;presentation_menu.sample({},true);presentation_menu.sample(press,true);
@@ -322,6 +322,24 @@ int main() try {
         presentation_menu.refresh_override.reset();
         presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.refresh_target()==90.F);
+        // RENDER RESOLUTION: 100/90/80/75%, saved in v10, applied next launch.
+        presentation_menu.active_resolution=1.F;
+        require(presentation_menu.labels()[9]=="RENDER RESOLUTION: 100%" && presentation_menu.resolution_scale()==1.F);
+        presentation_menu.selection=9;
+        for(const unsigned percent:{90U,80U,75U}) {
+            presentation_menu.sample({},true);presentation_menu.sample(press,true);
+            require(presentation_menu.labels()[9]=="RENDER RESOLUTION: "+std::to_string(percent)+"% NEXT LAUNCH"
+                && std::abs(presentation_menu.resolution_scale()-percent/100.F)<1e-6F);
+        }
+        {StartupMenu saved;require(saved.restore_preferences(presentation_menu.preferences()) && saved.resolution_scale()==.75F);}
+        {auto version9=presentation_menu.preferences();version9[4]=9;StartupMenu older;older.resolution_choice=2;
+            require(older.restore_preferences(std::span(version9).first(29)) && older.resolution_scale()==1.F);
+            auto invalid=presentation_menu.preferences();invalid[29]=4;require(!older.restore_preferences(invalid));}
+        presentation_menu.active_resolution=.75F;require(presentation_menu.labels()[9]=="RENDER RESOLUTION: 75%");
+        presentation_menu.resolution_override=.8F;require(presentation_menu.labels()[9]=="RENDER RESOLUTION: 80% ENV");
+        presentation_menu.resolution_override.reset();
+        presentation_menu.sample({},true);presentation_menu.sample(press,true);
+        require(presentation_menu.resolution_scale()==1.F && presentation_menu.labels()[10]=="BACK");
         presentation_menu.selection=7;presentation_menu.sample({},true);presentation_menu.sample(press,true);
         require(presentation_menu.recenter_revision==1);
         presentation_menu.presentation={true,false,5,-100,100,35};
@@ -375,8 +393,8 @@ int main() try {
                 && !migrated7.unlocked_pace && migrated7.presentation.cockpit
                 && migrated7.presentation.follow_ship_rotation && migrated7.presentation.origin_x==10
                 && migrated7.presentation.origin_y==-20 && migrated7.presentation.origin_z==30);
-            require(migrated7.preferences()[4]==9 && migrated7.preferences()[27]==60 && migrated7.preferences()[28]==0);
-            require(!migrated7.restore_preferences(v7)); // v7 header with a v9-sized record.
+            require(migrated7.preferences()[4]==10 && migrated7.preferences()[27]==60 && migrated7.preferences()[28]==0 && migrated7.preferences()[29]==0);
+            require(!migrated7.restore_preferences(v7)); // v7 header with a v10-sized record.
             auto bad=old.preferences();bad[27]=101;require(!migrated7.restore_preferences(bad));
         }
         // Physical B (bomb) is back on every page, in addition to the BACK rows.
