@@ -1127,3 +1127,13 @@ and behind the head. The rig test checks that both joints are within 8 cm and
 that every rear vertex is at least 0.5 m from the eye and behind z = -1.2 m.
 The rear packet is 156 triangles. Production CPU views:
 `build/cockpit-mockups/roll-hoop-production-2026-10-03.png`. Headset-unverified.
+
+### Ending Arwing and roll hoop delivery (October 3)
+
+Workflow `37095130428` passed for `1d68555` (ending Arwing at 24x, rear bulkhead,
+roll hoop). The ARM64 package was uploaded over Wi-Fi (192.168.1.31) as in the
+earlier deliveries. All package files match by SHA-256 (`starfox_steamframe`
+`bf7b909b…8da1`). The device metadata names a clean `1d68555`, no AppleDouble
+files were added, and the game was not running and was not launched. Assets,
+save, `pregame.cfg`, preferences and the Steam argv/settings are unchanged. The
+`eafbc1c` runtime is kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
