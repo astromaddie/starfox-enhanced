@@ -1184,3 +1184,11 @@ flags 1024 | sRGB only. No shader change was needed. A cartridge test (Original
 and EX) boots TITLEMAP into the intro and checks every glyph for the flat quad,
 the cleared billboard and sizing bits, and the GPU side length; it fails with the
 old billboarded glyphs. Headset-unverified.
+
+### Credits text delivery (October 4)
+
+Workflow `37131842021` passed for `b7bcd63`. The package was uploaded over Wi-Fi
+as before. All files match by SHA-256 (`starfox_steamframe` `a77cefbe…e4c4`). The
+device metadata names a clean `b7bcd63`, the game was not running and was not
+launched, and user data and Steam settings are unchanged. The `1b5cb83` runtime
+is kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
