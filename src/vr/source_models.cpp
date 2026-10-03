@@ -65,6 +65,14 @@ bool text_packet(const assets::RomImage& rom,uint32_t font,uint32_t messages,
     if(index>=palette.size()) {error="Invalid scaled text palette";return false;}
     const auto colour=palette[index];
     const uint32_t ink=uint32_t(colour.r)|(uint32_t(colour.g)<<8)|(uint32_t(colour.b)<<16)|0xff000000U;
+    // Glyph size matches the source and the GPU path: trunc(size*256/depth)
+    // pixels at depth, with no sprite cap. The quads are placed in the game
+    // camera's plane here, not in each eye's head-rolled billboard basis, so
+    // text such as the opening credits stays level when the head tilts.
+    const double depth=pose.z;
+    const double dimension=depth>=128?std::trunc(double(size)*256./depth):0.;
+    if(size<=0 || !(dimension>0)) return true;
+    const float side=float(dimension*depth/256.);
     std::array<uint32_t,42> offsets;offsets.fill(UINT32_MAX);
     for(size_t i=0;i<tokens.size();++i) {
         const auto token=tokens[i];if(token>41) continue;
@@ -81,9 +89,9 @@ bool text_packet(const assets::RomImage& rom,uint32_t font,uint32_t messages,
         const float left=float(i)-float(tokens.size())*.5F;
         const float corners[4][2]{{0,0},{1,0},{1,1},{0,1}};
         for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
-            SceneVertex v{};v.texture[0]=offset;v.texture[1]=v.texture[2]=15;v.texture[3]=134217728U|1028U|(srgb?2U:0U);
-            v.group_a[0]=float(size);v.group_a[1]=float(pose.z);v.group_b[0]=left;
-            v.billboard[0]=corners[corner][0];v.billboard[1]=.5F-corners[corner][1];
+            SceneVertex v{};v.texture[0]=offset;v.texture[1]=v.texture[2]=15;v.texture[3]=1024U|(srgb?2U:0U);
+            // Model Y points down (game_model_matrix flips it).
+            v.position[0]=(left+corners[corner][0])*side;v.position[1]=(corners[corner][1]-.5F)*side;
             v.uv[0]=corners[corner][0]*16;v.uv[1]=corners[corner][1]*16;
             packet.geometry.vertices.push_back(v);
         }

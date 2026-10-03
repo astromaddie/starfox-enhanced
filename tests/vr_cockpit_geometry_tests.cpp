@@ -1,4 +1,5 @@
 #include "starfox/vr/cockpit.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/source_sprites.hpp"
 #include "starfox/assets/runtime_bundle.hpp"
 #include "starfox/audio/spc700_audio.hpp"
@@ -111,7 +112,44 @@ void dump(const std::string& file,std::span<const DrawPacket> cabin,std::span<co
     }};
     packets(cabin,"cabin");packets(hud,"hud");packets(source,"world");out<<"]}\n";
 }
+// The attract intro's scaled credits text is placed in the game camera's plane
+// (flat model-space quads), not in each eye's head-rolled billboard basis.
+void verify_scaled_text(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    simulation::GameSimulation game(rom,symbols,"TITLEMAP");audio::Spc700Audio audio;
+    GameSceneHistory history(game,rom,symbols);
+    const auto text_count=[&]{unsigned n=0;for(const auto& o:history.current()->objects)n+=(o.object.strategy_flags[0]&0x40U)!=0;return n;};
+    for(unsigned tick=0;tick<3000 && text_count()<8;++tick) {
+        auto result=game.tick({});(void)audio.render_logic_tick(result.audio_port_writes);
+        game.synchronize_apu_output_ports(audio.output_ports());history.capture();
+    }
+    const auto& scene=*history.current();
+    require(scene.flow==simulation::GameFlowState::intro && text_count()>=8 && !world_panel_scene(scene));
+    SourceModels models(rom,symbols,true,true);
+    const auto world=models.assemble_world_interpolated(scene,scene,1,false,true);require(world.pending.empty());
+    unsigned glyphs=0;
+    for(size_t i=0;i<world.handles.size();++i) {
+        const auto object=std::find_if(scene.objects.begin(),scene.objects.end(),[&](const auto& o){return o.handle==world.handles[i];});
+        if(object==scene.objects.end() || !(object->object.strategy_flags[0]&0x40U)) continue;
+        const auto& packet=world.packets[i];const auto vertices=packet.geometry.vertex_view();
+        if(vertices.empty()) continue;
+        const double depth=-double(packet.model[14])*256,size=127+starfox::bit_cast<int8_t>(object->object.texture_scroll_x);
+        const float side=float(std::trunc(size*256./depth)*depth/256.);
+        require(side>0 && vertices.size()%6==0);
+        for(size_t q=0;q<vertices.size();q+=6) {
+            float low[2]{1e9F,1e9F},high[2]{-1e9F,-1e9F};
+            for(size_t k=q;k<q+6;++k) {
+                const auto& v=vertices[k];
+                require((v.texture[3]&1024U) && !(v.texture[3]&(4U|134217728U)) && v.position[2]==0
+                    && v.billboard[0]==0 && v.billboard[1]==0);
+                for(unsigned a=0;a<2;++a) {low[a]=std::min(low[a],v.position[a]);high[a]=std::max(high[a],v.position[a]);}
+            }
+            near(high[0]-low[0],side);near(high[1]-low[1],side);++glyphs;
+        }
+    }
+    require(glyphs>0);
+}
 void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::string& evidence) {
+    verify_scaled_text(rom,symbols);
     simulation::GameSimulation game(rom,symbols,"LEVEL1_1",{},true);audio::Spc700Audio audio;
     game.set_timing_mode(simulation::TimingMode::unlocked_20_fps);
     GameSceneHistory history(game,rom,symbols);

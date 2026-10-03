@@ -1170,3 +1170,17 @@ Wi-Fi as before. All files match by SHA-256 (`starfox_steamframe`
 running and was not launched, and user data and Steam settings are unchanged.
 The `1d68555` runtime is kept in `~/devkit-game/_StarFoxEnhanced_prev/`. Saved
 v8 preferences load as REFRESH RATE 90 HZ.
+
+## Opening credits text (October 4)
+
+Wearer report: the opening credits text rolled with head tilt. That text is the
+attract intro's scaled-text objects (flags 0x40, up to 12 at once). Their glyphs
+were billboards: the shader sized them (bit 27) and then added the corners in each
+eye's view space (bit 2), so they followed head roll. The shader's game-plane
+option (`group_b.z == 1`) only covered non-glyph sprites. `text_packet` now
+computes the same size on the CPU (`trunc(size*256/depth) * depth/256`, no
+sprite cap) and places each glyph as a flat quad in the game camera's plane, with
+flags 1024 | sRGB only. No shader change was needed. A cartridge test (Original
+and EX) boots TITLEMAP into the intro and checks every glyph for the flat quad,
+the cleared billboard and sizing bits, and the GPU side length; it fails with the
+old billboarded glyphs. Headset-unverified.
