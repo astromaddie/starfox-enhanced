@@ -158,9 +158,23 @@ void refresh_rates() {
     require(!run_window(60,false));                  // Unfocused: says nothing, resets.
     require(!run_window(70));
     const auto fallback=run_window(70);              // Second consecutive low focused window.
-    require(fallback==72.F && governor.fell_back());
-    require(governor.request(session,*fallback) && requested_rates.back()==72.F && governor.current()==72.F);
-    for(int i=0;i<5;++i) require(!run_window(10)); // Once only, whatever follows.
+    require(fallback==80.F && !governor.fell_back());  // Next lower offered rate, not straight to 72.
+    require(governor.request(session,*fallback) && requested_rates.back()==80.F && governor.current()==80.F);
+    require(!governor.observe(t,true)); // A new request starts a fresh window.
+    require(!run_window(60));
+    const auto floor_step=run_window(60);
+    require(floor_step==72.F && governor.fell_back());
+    require(governor.request(session,*floor_step) && requested_rates.back()==72.F);
+    for(int i=0;i<5;++i) require(!run_window(10)); // Nothing below the floor.
+
+    // A 120 Hz target steps 120 -> 108 on the Frame's offered rates.
+    fake_rates={72.F,80.F,90.F,96.F,108.F,120.F,144.F};fake_current=60.F;
+    RefreshRate fast(api);require(fast.request(session,120.F) && fast.requested()==120.F);
+    std::optional<float> step;
+    for(int i=0;i<2*100*10+10 && !step;++i) {t+=.01;if(const auto d=fast.observe(t,true)) step=d;}
+    require(step==108.F && !fast.fell_back());
+    fast.release();require(!fast.requested() && !fast.observe(t+20,true));
+    fake_rates={72.F,80.F,90.F,120.F};
 
     // Already at or below the fallback: nothing to drop to.
     fake_rates={72.F};RefreshRate floor_rate(api);

@@ -1137,3 +1137,27 @@ earlier deliveries. All package files match by SHA-256 (`starfox_steamframe`
 files were added, and the game was not running and was not launched. Assets,
 save, `pregame.cfg`, preferences and the Steam argv/settings are unchanged. The
 `eafbc1c` runtime is kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
+
+## Refresh rate setting (October 3)
+
+Wearer question: does the Frame's 120 Hz system setting apply? It did not. The
+port requested the highest offered rate at or below 90 Hz, and the compositor log
+for 13:15 shows "Trying to match desired rate of 90" from offered 72, 80, 90, 96,
+108, 120 and 144 Hz.
+
+VR PRESENTATION now has REFRESH RATE: 90 HZ (default), 120 HZ or SYSTEM, saved as
+preferences v9 (byte 28; v1–v8 load as 90 Hz). `SFX_VR_REFRESH_RATE` still
+overrides it and shows as "<n> HZ ENV". The application requests again whenever
+the choice changes. SYSTEM calls `RefreshRate::release()`, which stops requests
+and the governor; a rate already requested in this session cannot be withdrawn
+through XR_FB_display_refresh_rate, so SYSTEM fully applies from the next launch.
+The packaged `vrpreferences.json` minimum of 90 Hz is unchanged.
+
+The governor now steps down one offered rate at a time after two low focused
+10 s windows (for example 120 → 108 → 96 → 90 → 80 → 72), restarting its window
+after each request. It reports `fell_back()` once at the 72 Hz floor. Refresh
+decisions and every `[vr-perf]` line (now with `display=<Hz>`) also go to
+`~/.local/share/StarFoxEnhanced/vr-session.log`, rewritten each launch, because
+stdout is not kept on the Frame. Tests cover the menu cycle, persistence,
+v8 migration, the ENV label, 90 → 80 → 72 and 120 → 108 steps, release, and the
+floor. 120 Hz performance is unmeasured.

@@ -54,6 +54,15 @@ public:
     unsigned haptics_percent{60};
     // SFX_VR_HAPTICS (0..1) wins over the saved percent and is never saved.
     std::optional<float> haptics_override;
+    // Display refresh: 0 = 90 Hz, 1 = 120 Hz, 2 = the Frame's system setting
+    // (no request). SFX_VR_REFRESH_RATE overrides the saved choice.
+    unsigned refresh_choice{};
+    std::optional<float> refresh_override;
+    std::optional<float> refresh_target() const noexcept {
+        if(refresh_override) return refresh_override;
+        if(refresh_choice==2) return std::nullopt;
+        return refresh_choice==1?120.F:90.F;
+    }
     float haptics_strength() const noexcept {
         return haptics_override?*haptics_override:float(std::min(haptics_percent,100U))/100.F;
     }
@@ -61,8 +70,8 @@ public:
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
-    std::array<uint8_t,28> preferences() const noexcept {
-        return {'S','F','V','R',8,uint8_t(language),uint8_t(god_mode),
+    std::array<uint8_t,29> preferences() const noexcept {
+        return {'S','F','V','R',9,uint8_t(language),uint8_t(god_mode),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
@@ -70,13 +79,13 @@ public:
             uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
             uint8_t(presentation.cockpit),uint8_t(presentation.world_scale),uint8_t(presentation.head_translation),
             uint8_t(presentation.origin_x+100),uint8_t(presentation.origin_y+100),uint8_t(presentation.origin_z+100),uint8_t(presentation.follow_ship_rotation),
-            uint8_t(std::min(haptics_percent,100U))};
+            uint8_t(std::min(haptics_percent,100U)),uint8_t(std::min(refresh_choice,2U))};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
-        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26 && bytes.size()!=27 && bytes.size()!=28) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
-            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>8) || bytes[5]>=6 || bytes[7]>=3
+        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=26 && bytes.size()!=27 && bytes.size()!=28 && bytes.size()!=29) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
+            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>9) || bytes[5]>=6 || bytes[7]>=3
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
-        if(bytes.size()!=(bytes[4]>=8?28U:bytes[4]>=7?27U:bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
+        if(bytes.size()!=(bytes[4]>=9?29U:bytes[4]>=8?28U:bytes[4]>=7?27U:bytes[4]>=6?26U:bytes[4]>=4?20U:16U)) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -93,10 +102,12 @@ public:
             || bytes[23]>200 || bytes[24]>200 || bytes[25]>200)) return false;
         if(bytes[4]>=7 && bytes[26]>1) return false;
         if(bytes[4]>=8 && bytes[27]>100) return false;
+        if(bytes[4]>=9 && bytes[28]>2) return false;
         presentation={};
         if(bytes[4]>=6) presentation={bytes[20]!=0,bytes[22],bytes[21],int(bytes[23])-100,int(bytes[24])-100,int(bytes[25])-100};
         if(bytes[4]>=7) presentation.follow_ship_rotation=bytes[26]!=0;
         haptics_percent=bytes[4]>=8?bytes[27]:60; // v1-v7 keep the 0.6 default
+        refresh_choice=bytes[4]>=9?bytes[28]:0; // v1-v8 keep 90 Hz
         language=bytes[5];god_mode=bytes[6];default_laser=bytes[7];msu_music=bytes[8];
         music_volume=bytes[9];sfx_volume=bytes[10];unlocked_pace=(bytes[11]&1)!=0;
         ray_tracing=bytes[4]>=2 && (bytes[11]&2)!=0;
@@ -111,7 +122,7 @@ public:
     }
     unsigned row_count() const noexcept {
         switch(page) {
-        case Page::presentation: return 9;
+        case Page::presentation: return 10;
         case Page::exit_confirmation: case Page::reset_confirmation: return 2;
         case Page::main: return runtime?7:6; // RESET GAME only mid-game
         case Page::options: return 12;
@@ -210,6 +221,7 @@ public:
                     int& value=selection==4?presentation.origin_x:selection==5?presentation.origin_y:presentation.origin_z;
                     value=value>=100?-100:value+5;
                 } else if(selection==7) ++recenter_revision;
+                else if(selection==8) refresh_choice=(refresh_choice+1)%3;
                 else {page=Page::options;selection=10;}
             } else if(page==Page::three_d) {
                 if(selection==0) model_effect=next_style(model_effect);
@@ -257,7 +269,9 @@ public:
             "HEAD TRANSLATION: "+std::to_string(presentation.head_translation*50)+"%",
             "COCKPIT X: "+std::to_string(presentation.origin_x)+" CM",
             "COCKPIT Y: "+std::to_string(presentation.origin_y)+" CM",
-            "COCKPIT Z: "+std::to_string(presentation.origin_z)+" CM","RECENTER","BACK"};
+            "COCKPIT Z: "+std::to_string(presentation.origin_z)+" CM","RECENTER",
+            "REFRESH RATE: "+(refresh_override?std::to_string(int(*refresh_override+.5F))+" HZ ENV"
+                :refresh_choice==2?std::string("SYSTEM"):refresh_choice==1?std::string("120 HZ"):std::string("90 HZ")),"BACK"};
         if(page==Page::three_d || page==Page::two_d) {
             const bool models=page==Page::three_d;
             std::vector<std::string> rows{

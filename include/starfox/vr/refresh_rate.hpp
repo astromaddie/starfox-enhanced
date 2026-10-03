@@ -7,10 +7,11 @@
 
 namespace starfox::vr {
 // Display refresh request through XR_FB_display_refresh_rate (standard,
-// section 9). `refresh_rate` defaults to 90; the request picks the highest rate
-// the runtime offers that is at most the target. After two consecutive 10 s
-// windows below 90% of the current rate while the session is focused, the
-// governor asks for the 72 Hz fallback once and stays there for the session.
+// section 9). The target comes from the REFRESH RATE setting (90 by default,
+// 120, or none for the system rate); the request picks the highest rate the
+// runtime offers that is at most the target. After two consecutive 10 s windows
+// below 90% of the current rate while the session is focused, the governor steps
+// down to the next lower offered rate, and so on until the 72 Hz floor.
 // Everything the runtime does is behind an injectable function table.
 struct RefreshApi {
     PFN_xrEnumerateDisplayRefreshRatesFB enumerate{};
@@ -40,12 +41,16 @@ public:
     // Enumerate, choose and request for `target` Hz. False when the extension is
     // unavailable, nothing is offered, or the runtime refuses (status() says why).
     bool request(XrSession session,float target);
-    // One call per submitted stereo frame. Returns the fallback rate to pass to
-    // request() when the governor decides to drop, at most once per session.
+    // Stop requesting and governing; the runtime's own rate applies from the
+    // next session (a request already made cannot be withdrawn).
+    void release() noexcept {requested_.reset();fell_back_=false;status_="Display refresh rate left to the system";}
+    // One call per submitted stereo frame. Returns the next lower offered rate
+    // to pass to request() when the governor steps down; nothing once at 72 Hz.
     [[nodiscard]] std::optional<float> observe(double now_seconds,bool focused) noexcept;
     [[nodiscard]] std::optional<float> requested() const noexcept {return requested_;}
     // The rate the runtime reports now, refreshed at each window end.
     [[nodiscard]] std::optional<float> current() const noexcept {return current_;}
+    // True once the governor has reached the 72 Hz floor.
     [[nodiscard]] bool fell_back() const noexcept {return fell_back_;}
     [[nodiscard]] const std::vector<float>& offered() const noexcept {return offered_;}
     [[nodiscard]] const std::string& status() const noexcept {return status_;}

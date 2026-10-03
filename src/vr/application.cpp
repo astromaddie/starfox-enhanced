@@ -744,6 +744,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::Matrix4 instrument_transform=starfox::vr::identity_matrix;
     starfox::vr::StartupMenu startup;
     startup.haptics_override=starfox::vr::env_override_float("haptics");
+    startup.refresh_override=starfox::vr::env_override_float("refresh_rate");
     if(startup.haptics_override) std::cout<<"[vr] haptics strength overridden by SFX_VR_HAPTICS: "<<*startup.haptics_override<<'\n';
     startup.ray_tracing_available=ray_supported;startup.ray_tracing=ray_tracing;
     starfox::vr::VulkanScenePipeline circle_pipeline;
@@ -786,10 +787,18 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             :starfox::assets::SymbolMap::load(alternate_symbols),!initial_extended);
     const auto preferences_path=host.cartridge_save_path.empty()?std::filesystem::path{}
         :host.cartridge_save_path.parent_path()/"vr-preferences.bin";
+    // Refresh and [vr-perf] lines also go to vr-session.log beside the
+    // preferences (stdout is not kept on the Frame); rewritten each launch.
+    std::ofstream session_file;
+    if(!preferences_path.empty()) session_file.open(preferences_path.parent_path()/"vr-session.log",std::ios::trunc);
+    const auto session_log=[&](const std::string& line) {
+        std::cout<<line<<std::endl;
+        if(session_file) session_file<<line<<std::endl;
+    };
     if(startup.open && !preferences_path.empty()) try {
         if(std::filesystem::exists(preferences_path)) {
             const auto size=std::filesystem::file_size(preferences_path);
-            if((size!=16 && size!=20 && size!=26 && size!=27 && size!=28)
+            if((size!=16 && size!=20 && size!=26 && size!=27 && size!=28 && size!=29)
                 || !startup.restore_preferences(starfox::state::read_file(preferences_path)))
                 std::cerr<<"Invalid VR preferences; using defaults\n";
         }
@@ -816,6 +825,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::RefreshRate refresh_rate(runtime.supports_display_refresh_rate()
         ?starfox::vr::RefreshApi::from_instance(runtime.instance()):starfox::vr::RefreshApi{});
     bool refresh_rate_requested=false;
+    std::optional<float> refresh_rate_target;
     std::optional<XrTime> perf_last_display_time;
     FrameWait frame_wait;
     while((!host.frame_limit || submitted<host.frame_limit)
@@ -834,16 +844,21 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 cancelled=true;break;
             }
         }
-        if(!refresh_rate_requested && session.running()) {
-            refresh_rate_requested=true;
-            const float target=starfox::vr::env_override_float("refresh_rate")
-                .value_or(starfox::vr::RefreshRate::default_target);
-            if(refresh_rate.request(session.handle(),target)) {
-                std::cout<<"[vr] display refresh offered:";
-                for(const float rate:refresh_rate.offered()) std::cout<<' '<<rate;
-                std::cout<<"; target "<<target<<", requested "<<*refresh_rate.requested()
-                    <<", current "<<*refresh_rate.current()<<" Hz\n";
-            } else std::cout<<"[vr] display refresh request skipped: "<<refresh_rate.status()<<'\n';
+        // REFRESH RATE setting (SFX_VR_REFRESH_RATE overrides): request once the
+        // session runs and again whenever the choice changes.
+        if(session.running() && (!refresh_rate_requested || startup.refresh_target()!=refresh_rate_target)) {
+            refresh_rate_requested=true;refresh_rate_target=startup.refresh_target();
+            std::ostringstream line;
+            if(!refresh_rate_target) {
+                refresh_rate.release();
+                line<<"[vr] display refresh left to the system setting";
+            } else if(refresh_rate.request(session.handle(),*refresh_rate_target)) {
+                line<<"[vr] display refresh offered:";
+                for(const float rate:refresh_rate.offered()) line<<' '<<rate;
+                line<<"; target "<<*refresh_rate_target<<", requested "<<*refresh_rate.requested()
+                    <<", current "<<*refresh_rate.current()<<" Hz";
+            } else line<<"[vr] display refresh request skipped: "<<refresh_rate.status();
+            session_log(line.str());
         }
         renderer.set_head_translation(startup.presentation.translation_scale());
         const auto result=renderer.step_async([&](unsigned eye,uint32_t image,const auto& tracking_camera,XrTime time) {
@@ -1702,10 +1717,16 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 }
                 perf_log.add_frame(now_s,frame);
                 if(const auto fallback=refresh_rate.observe(now_s,session.state()==XR_SESSION_STATE_FOCUSED)) {
-                    std::cout<<"[vr] display refresh below 90% for two 10 s windows; requesting "<<*fallback<<" Hz: "
-                        <<(refresh_rate.request(session.handle(),*fallback)?"ok":refresh_rate.status())<<'\n';
+                    std::ostringstream line;
+                    line<<"[vr] display refresh below 90% for two 10 s windows; requesting "<<*fallback<<" Hz: "
+                        <<(refresh_rate.request(session.handle(),*fallback)?"ok":refresh_rate.status());
+                    session_log(line.str());
                 }
-                if(const auto line=perf_log.poll(now_s)) std::cout<<*line<<std::endl;
+                if(const auto line=perf_log.poll(now_s)) {
+                    std::ostringstream rate;
+                    if(refresh_rate.current()) rate<<" display="<<*refresh_rate.current()<<"Hz";
+                    session_log(*line+rate.str());
+                }
             }
             if(profile_csv.enabled()) {
                 const auto now=std::chrono::steady_clock::now();

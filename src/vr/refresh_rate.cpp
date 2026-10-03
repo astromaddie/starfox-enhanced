@@ -77,9 +77,14 @@ std::optional<float> RefreshRate::observe(double now,bool focused) noexcept {
     else if(fps<reference*low_fraction) ++low_windows_;
     else low_windows_=0;
     window_start_=now;frames_=0;tainted_=false;
-    if(low_windows_>=low_windows_before_fallback && reference>fallback_rate) {
-        fell_back_=true;return fallback_rate;
-    }
-    return std::nullopt;
+    if(low_windows_<low_windows_before_fallback) return std::nullopt;
+    // Step to the next lower offered rate, never below the floor.
+    std::optional<float> lower;
+    for(const float rate:offered_)
+        if(std::isfinite(rate) && rate>=fallback_rate-.5F && rate<reference-.5 && (!lower || rate>*lower)) lower=rate;
+    low_windows_=0;
+    if(!lower) return std::nullopt; // Already at the lowest usable rate.
+    if(*lower<=fallback_rate+.5F) fell_back_=true;
+    return lower;
 }
 }
