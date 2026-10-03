@@ -1019,10 +1019,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     // The startup/runtime panel replaces the scene. Do not
                     // compile or upload invisible game resources while it is open.
                     if(!startup.open || startup.preview) {
-                    instrument_transform=starfox::vr::presentation_instrument_matrix(*live->history->previous(),
-                        *live->history->current(),alpha,startup.presentation);
-                    presentation_transform=starfox::vr::presentation_scene_matrix(*live->history->previous(),
-                        *live->history->current(),alpha,startup.presentation);
+                    instrument_transform=starfox::vr::presentation_instrument_matrix(*live->history->older(),
+                        *live->history->previous(),*live->history->current(),alpha,startup.presentation);
+                    presentation_transform=starfox::vr::presentation_scene_matrix(*live->history->older(),
+                        *live->history->previous(),*live->history->current(),alpha,startup.presentation);
                     const bool cockpit_active=pilot_view_active(*live->history->current(),startup.presentation);
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true,cockpit_active);
                     if(live->game.paused()) {

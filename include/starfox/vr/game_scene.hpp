@@ -132,10 +132,12 @@ public:
     // tick. Publication is transactional; retained older snapshots stay valid.
     void capture();
     // Pause/camera-clock rebases must not replay the previous pose on resume.
-    void reset_interpolation() noexcept {previous_=current_;}
+    void reset_interpolation() noexcept {older_=previous_=current_;}
     [[nodiscard]] const simulation::GameSimulation& game() const {return game_;}
     [[nodiscard]] std::shared_ptr<const GameSceneSnapshot> current() const {return current_;}
     [[nodiscard]] std::shared_ptr<const GameSceneSnapshot> previous() const {return previous_;}
+    // The tick before previous(), for presentation smoothing across ticks.
+    [[nodiscard]] std::shared_ptr<const GameSceneSnapshot> older() const {return older_;}
 private:
     const simulation::GameSimulation& game_;
     const assets::RomImage& rom_;
@@ -163,7 +165,7 @@ private:
     uint16_t water_background_{};
     uint16_t colony_background_{};
     std::array<uint32_t,3> dust_addresses_{};
-    std::shared_ptr<const GameSceneSnapshot> previous_,current_;
+    std::shared_ptr<const GameSceneSnapshot> older_,previous_,current_;
     render::GridLineHistory grid_line_history_;
 };
 }

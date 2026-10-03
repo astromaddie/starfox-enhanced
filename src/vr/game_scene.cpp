@@ -130,7 +130,7 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
             && (entry.front()&0xff0000U)==(background_lists.front()&0xff0000U))
             unique_backgrounds_[i]=static_cast<uint16_t>(entry.front()-background_lists.front());
     }
-    capture();previous_=current_;
+    capture();older_=previous_=current_;
 }
 
 void GameSceneHistory::capture() {
@@ -435,6 +435,6 @@ void GameSceneHistory::capture() {
         }
         grid_history.finish(frame,endpoint);
     }
-    previous_=current_;current_=std::move(next);grid_line_history_=grid_history;
+    older_=previous_;previous_=current_;current_=std::move(next);grid_line_history_=grid_history;
 }
 }

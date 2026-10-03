@@ -1019,3 +1019,35 @@ The game was not running, and no launch was performed. The cartridge assets and
 `starfox-ex.srm` are unchanged, along with `pregame.cfg`,
 `~/.local/share/StarFoxEnhanced`, and the Steam argv/settings JSON. The previous `e86cc07`
 runtime, metadata, launcher and vrpreferences are kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
+
+## Cockpit motion smoothing (October 3)
+
+Wearer report: turning felt jerky. A 90 Hz probe of LEVEL1_1 through the real
+frame driver (steer left, steer right, steer with roll) found linear interpolation
+working as designed. The jerk is in the source motion. Velocity changes in a step
+every 20 Hz tick, and the source camera tilts ±8.4° at a constant ~60°/s with
+instant starts and stops. One tick in six seconds moved 1.84x the normal distance.
+The wearer's saved preferences had Follow ship rotation ON, which adds the ship's
+own bank and barrel rolls (up to 94° at ~1,170°/s).
+
+The wearer chose smoothing only; roll and Follow ship rotation are unchanged. In
+pilot view, `presentation_scene_matrix` and `presentation_instrument_matrix` now
+take older/previous/current snapshots (`GameSceneHistory::older()`). The pilot
+position, ship rotation, source camera and view follow a uniform quadratic
+B-spline through the last three ticks (de Boor over the existing Q15
+interpolation). Position and velocity are continuous across ticks, half a tick
+(25 ms) behind the linear path. A cut before `previous` restarts there; a cut
+before `current` jumps, as before. Scene content stays linear; the scene matrix
+carries a rigid correction from the linear to the smoothed source camera. The
+world, sprites, shadows and cabin therefore share one smoothed pose. Other views
+are unchanged. Things spawned at the ship, such as lasers, can appear up to
+~1.5 m ahead of the cabin nose at full speed (half a tick of forward motion).
+
+Probe result: world acceleration seen from the cockpit (Follow OFF) drops from a
+5,340 m/s² peak (RMS 370–620) to 1,190–1,730 (RMS 200–330). Angular-acceleration
+spikes drop 3–5x. With Follow ON, spikes drop about 3x; roll rates are unchanged.
+`vr_presentation_tests` checks, through the real content path, that the smoothed
+view equals the linear path half a tick later under steady motion (including a
+16-bit wrap), that the cabin matches, that position is continuous across ticks
+and velocity is continuous to within a tenth of the linear jump, and that cuts and
+non-cockpit views are handled. Headset-unverified.

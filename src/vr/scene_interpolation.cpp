@@ -23,20 +23,68 @@ Matrix4 inverse_pilot_rotation(const Matrix4& rotation) {
 simulation::MatrixQ15 landscape_scene_view(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha) {
     return simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
 }
-Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
-    double alpha,const PresentationPreferences& preferences) {
-    auto out=identity_matrix;
-    if(!pilot_view_active(current,preferences)) return out;
+namespace {
+// Pilot inputs already interpolated for one display time.
+struct PilotPose {
+    timing::RenderTransform player,camera;
+    simulation::MatrixQ15 view{},rotation{};
+};
+bool pilot_continuous(const GameSceneSnapshot& previous,const GameSceneSnapshot& current) noexcept {
+    const auto* old=previous.pilot_reference?&*previous.pilot_reference:nullptr;
+    const auto& now=*current.pilot_reference;
+    return old && previous.pilot_tracking && previous.player==current.player && previous.flow==current.flow
+        && old->generation==now.generation && old->strategy_address==now.strategy_address
+        && !timing::camera_transform_is_discontinuous(previous.camera,current.camera);
+}
+PilotPose linear_pilot_pose(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha) {
     const auto& now=*current.pilot_reference;
     const auto* old=previous.pilot_reference?&*previous.pilot_reference:nullptr;
-    if(!std::isfinite(alpha) || !old || !previous.pilot_tracking || previous.player!=current.player
-        || previous.flow!=current.flow || old->generation!=now.generation
-        || old->strategy_address!=now.strategy_address
-        || timing::camera_transform_is_discontinuous(previous.camera,current.camera)) alpha=1;
+    if(!std::isfinite(alpha) || !pilot_continuous(previous,current)) alpha=1;
     alpha=std::clamp(alpha,0.,1.);
-    const auto rotation=simulation::interpolate_rotation_matrix_q15(old?old->rotation_matrix:now.rotation_matrix,now.rotation_matrix,alpha);
-    const auto view=simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
-    const auto authored=simulation::multiply_presentation_matrix_q15(rotation,view);
+    return {timing::interpolate(old?old->transform:now.transform,now.transform,alpha),
+        timing::interpolate(previous.camera,current.camera,alpha),
+        simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha),
+        simulation::interpolate_rotation_matrix_q15(old?old->rotation_matrix:now.rotation_matrix,now.rotation_matrix,alpha)};
+}
+double wrapped_delta(double to,double from) noexcept {
+    auto d=std::fmod(to-from,65536.);
+    if(d>32767.) d-=65536.;else if(d<-32768.) d+=65536.;
+    return d;
+}
+timing::RenderTransform lerp_position(const timing::RenderTransform& a,const timing::RenderTransform& b,double t) noexcept {
+    auto out=a;
+    out.x=a.x+wrapped_delta(b.x,a.x)*t;out.y=a.y+wrapped_delta(b.y,a.y)*t;out.z=a.z+wrapped_delta(b.z,a.z)*t;
+    return out;
+}
+timing::RenderTransform exact_position(const timing::TransformSnapshot& value) noexcept {
+    return timing::interpolate(value,value,1);
+}
+// Uniform quadratic B-spline through three consecutive ticks, by de Boor:
+// position and velocity stay continuous across ticks, half a tick behind the
+// linear path. A cut before `previous` restarts from it; a cut before `current`
+// jumps to it, as the linear path does.
+PilotPose smoothed_pilot_pose(const GameSceneSnapshot& older,const GameSceneSnapshot& previous,
+    const GameSceneSnapshot& current,double alpha) {
+    if(!std::isfinite(alpha) || !pilot_continuous(previous,current)) return linear_pilot_pose(previous,current,1);
+    alpha=std::clamp(alpha,0.,1.);
+    const auto& first=older.pilot_reference && pilot_continuous(older,previous)?older:previous;
+    const auto blend_position=[&](auto get) {
+        const auto a=exact_position(get(first)),b=exact_position(get(previous)),c=exact_position(get(current));
+        return lerp_position(lerp_position(a,b,.5+alpha/2),lerp_position(b,c,alpha/2),alpha);
+    };
+    const auto blend_rotation=[&](auto get) {
+        using simulation::interpolate_rotation_matrix_q15;
+        return interpolate_rotation_matrix_q15(interpolate_rotation_matrix_q15(get(first),get(previous),.5+alpha/2),
+            interpolate_rotation_matrix_q15(get(previous),get(current),alpha/2),alpha);
+    };
+    return {blend_position([](const GameSceneSnapshot& s){return s.pilot_reference->transform;}),
+        blend_position([](const GameSceneSnapshot& s){return s.camera;}),
+        blend_rotation([](const GameSceneSnapshot& s){return s.view_matrix;}),
+        blend_rotation([](const GameSceneSnapshot& s){return s.pilot_reference->rotation_matrix;})};
+}
+Matrix4 instrument_matrix(const PilotPose& pose,const PresentationPreferences& preferences) {
+    auto out=identity_matrix;
+    const auto authored=simulation::multiply_presentation_matrix_q15(pose.rotation,pose.view);
     // D * authored * D converts the ship-local +Y-down/+Z-forward basis to XR.
     for(unsigned c=0;c<3;++c) for(unsigned r=0;r<3;++r)
         out[c*4+r]=float(authored[c*3+r])/32768.F*((c==0)==(r==0)?1.F:-1.F);
@@ -47,48 +95,73 @@ Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& previous,const G
     if(preferences.follow_ship_rotation) out=multiply_matrix(inverse_pilot_rotation(out),out);
     return out;
 }
-Matrix4 presentation_scene_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
-    double alpha,const PresentationPreferences& preferences) {
+Matrix4 scene_matrix(const PilotPose& pose,const PresentationPreferences& preferences) {
     auto out=identity_matrix;
-    const bool pilot=pilot_view_active(current,preferences);
-    const float scale=pilot?cockpit_world_scale(preferences):preferences.scale();
-    out[0]=out[5]=out[10]=scale;
-    if(!pilot) return out;
-    const auto& now=*current.pilot_reference;
-    const auto* old=previous.pilot_reference?&*previous.pilot_reference:nullptr;
-    if(!std::isfinite(alpha) || !old || !previous.pilot_tracking || previous.flow!=current.flow
-        || previous.player!=current.player || old->generation!=now.generation
-        || old->strategy_address!=now.strategy_address
-        || timing::camera_transform_is_discontinuous(previous.camera,current.camera)) alpha=1;
-    alpha=std::clamp(alpha,0.,1.);
-    const auto player=timing::interpolate(old?old->transform:now.transform,now.transform,alpha);
-    const auto camera=timing::interpolate(previous.camera,current.camera,alpha);
-    const auto view=simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,alpha);
-    const auto rotation=simulation::interpolate_rotation_matrix_q15(old?old->rotation_matrix:now.rotation_matrix,now.rotation_matrix,alpha);
+    const float scale=cockpit_world_scale(preferences);out[0]=out[5]=out[10]=scale;
     // Calibration is in physical centimetres even when source world scale changes.
     const double local[]{(preferences.origin_x*.01+cockpit_seat_m[0])*256/scale,
         -(preferences.origin_y*.01+cockpit_seat_m[1])*256/scale,
         -(preferences.origin_z*.01+cockpit_seat_m[2])*256/scale};
-    double point[]{player.x,player.y,player.z};
-    for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) point[r]+=local[c]*rotation[c*3+r]/32768.;
-    const double origin[]{camera.x,camera.y,camera.z};
+    double point[]{pose.player.x,pose.player.y,pose.player.z};
+    for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) point[r]+=local[c]*pose.rotation[c*3+r]/32768.;
+    const double origin[]{pose.camera.x,pose.camera.y,pose.camera.z};
     double delta[3]{};
-    for(unsigned i=0;i<3;++i) {
-        delta[i]=std::fmod(point[i]-origin[i],65536.);
-        if(delta[i]>32767.) delta[i]-=65536.;else if(delta[i]<-32768.) delta[i]+=65536.;
-    }
+    for(unsigned i=0;i<3;++i) delta[i]=wrapped_delta(point[i],origin[i]);
     for(unsigned r=0;r<3;++r) {
-        double component{};for(unsigned c=0;c<3;++c) component+=delta[c]*view[c*3+r]/32768.;
+        double component{};for(unsigned c=0;c<3;++c) component+=delta[c]*pose.view[c*3+r]/32768.;
         out[12+r]=float(component/256.)*(r==0?-scale:scale);
     }
     if(preferences.follow_ship_rotation) {
         auto fixed=preferences;fixed.follow_ship_rotation=false;
-        const auto ship=presentation_instrument_matrix(previous,current,alpha,fixed);
         // Translate to the calibrated pilot first, then rotate the whole source
         // scene into the ship frame. Tracking is composed later by application.
-        out=multiply_matrix(inverse_pilot_rotation(ship),out);
+        out=multiply_matrix(inverse_pilot_rotation(instrument_matrix(pose,fixed)),out);
     }
     return out;
+}
+// Scene content places world points as F * view * (X - camera) / 256 metres,
+// F = diag(1,-1,-1) (interpolate_scene_poses + game_model_matrix).
+Matrix4 content_basis(const simulation::MatrixQ15& view) noexcept {
+    auto out=identity_matrix;
+    for(unsigned k=0;k<3;++k) for(unsigned r=0;r<3;++r) out[k*4+r]=float(view[k*3+r])/32768.F*(r==0?1.F:-1.F);
+    return out;
+}
+}
+Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
+    double alpha,const PresentationPreferences& preferences) {
+    if(!pilot_view_active(current,preferences)) return identity_matrix;
+    return instrument_matrix(linear_pilot_pose(previous,current,alpha),preferences);
+}
+Matrix4 presentation_scene_matrix(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
+    double alpha,const PresentationPreferences& preferences) {
+    if(!pilot_view_active(current,preferences)) {
+        auto out=identity_matrix;out[0]=out[5]=out[10]=preferences.scale();return out;
+    }
+    return scene_matrix(linear_pilot_pose(previous,current,alpha),preferences);
+}
+Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& older,const GameSceneSnapshot& previous,
+    const GameSceneSnapshot& current,double alpha,const PresentationPreferences& preferences) {
+    if(!pilot_view_active(current,preferences)) return identity_matrix;
+    return instrument_matrix(smoothed_pilot_pose(older,previous,current,alpha),preferences);
+}
+Matrix4 presentation_scene_matrix(const GameSceneSnapshot& older,const GameSceneSnapshot& previous,
+    const GameSceneSnapshot& current,double alpha,const PresentationPreferences& preferences) {
+    if(!pilot_view_active(current,preferences)) return presentation_scene_matrix(previous,current,alpha,preferences);
+    const auto pose=smoothed_pilot_pose(older,previous,current,alpha);
+    // Content stays on the linear source camera (interpolate_scene_poses uses
+    // the same alpha rules); move it onto the smoothed camera before the pilot.
+    double content_alpha=std::isfinite(alpha)?std::clamp(alpha,0.,1.):1.;
+    if(previous.flow!=current.flow || timing::camera_transform_is_discontinuous(previous.camera,current.camera)) content_alpha=1;
+    const auto camera=timing::interpolate(previous.camera,current.camera,content_alpha);
+    const auto view=simulation::interpolate_rotation_matrix_q15(previous.view_matrix,current.view_matrix,content_alpha);
+    const auto smoothed=content_basis(pose.view);
+    auto correction=multiply_matrix(smoothed,inverse_pilot_rotation(content_basis(view)));
+    const double offset[]{wrapped_delta(camera.x,pose.camera.x),wrapped_delta(camera.y,pose.camera.y),wrapped_delta(camera.z,pose.camera.z)};
+    for(unsigned r=0;r<3;++r) {
+        double component{};for(unsigned c=0;c<3;++c) component+=smoothed[c*4+r]*offset[c];
+        correction[12+r]=float(component/256.);
+    }
+    return multiply_matrix(scene_matrix(pose,preferences),correction);
 }
 std::optional<SteeringMatrix> cockpit_steering_matrix(const GameSceneSnapshot& scene,
     const PresentationPreferences& preferences) {

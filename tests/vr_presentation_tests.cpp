@@ -2,6 +2,7 @@
 #include "starfox/vr/stereo_renderer.hpp"
 #include "starfox/vr/startup_menu.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
+#include "starfox/vr/game_model_pose.hpp"
 #include "starfox/vr/source_sprites.hpp"
 #include "starfox/render/hud_layout.hpp"
 #include "starfox/render/scaled_text_renderer.hpp"
@@ -22,6 +23,83 @@ std::array<float,4> point(const Matrix4& m,std::array<float,4> p) {
     std::array<float,4> out{};
     for(unsigned r=0;r<4;++r) for(unsigned c=0;c<4;++c) out[r]+=m[c*4+r]*p[c];
     return out;
+}
+// Cockpit display smoothing through three ticks, measured through the real
+// content path (interpolate_scene_poses + game_model_matrix) on static points.
+void verify_cockpit_smoothing() {
+    using namespace starfox;
+    const auto rotation=[](double yaw,double roll) {
+        const double cy=std::cos(yaw),sy=std::sin(yaw),cr=std::cos(roll),sr=std::sin(roll);
+        const double m[9]{cy*cr,sr,-sy*cr, -cy*sr,cr,sy*sr, sy,0,cy}; // column-major
+        simulation::MatrixQ15 out{};for(unsigned i=0;i<9;++i)out[i]=int16_t(std::lround(m[i]*32767));
+        return out;
+    };
+    const auto wrap=[](double v) {auto w=std::fmod(v+32768.,65536.);if(w<0)w+=65536.;return int32_t(std::lround(w-32768.));};
+    // Tick k: camera and pilot move by `velocity(k)`; view yaws and the ship rolls by `turn(k)`.
+    const auto tick=[&](double k,auto position,auto turn,bool cut=false) {
+        GameSceneSnapshot s;s.flow=simulation::GameFlowState::gameplay;s.pilot_tracking=true;s.player=7;
+        const auto at=position(k);const auto angle=turn(k);
+        s.camera={wrap(at[0]+(cut?9000:0)),wrap(at[1]),wrap(at[2]),0,0,0};
+        s.view_matrix=rotation(angle,0);
+        render::ObjectPresentationSnapshot pilot;pilot.generation=2;pilot.strategy_address=1;
+        pilot.transform={wrap(at[0]+40+(cut?9000:0)),wrap(at[1]-30),wrap(at[2]+600),0,0,0};
+        pilot.rotation_matrix=rotation(angle*.5,angle*2);s.pilot_reference=pilot;
+        return s;
+    };
+    const auto eye=[&](const GameSceneSnapshot* older,const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
+        double alpha,const PresentationPreferences& prefs,std::array<int32_t,3> world) {
+        auto before=previous,now=current;
+        render::ObjectPresentationSnapshot object;object.generation=1;object.rotation_matrix=rotation(0,0);
+        object.transform={world[0],world[1],world[2],0,0,0};
+        now.objects.emplace_back();now.objects.back().handle=900;now.objects.back().presentation=object;
+        before.transforms[900]=object;now.transforms[900]=object;
+        const auto poses=interpolate_scene_poses(before,now,alpha,{});
+        const auto model=*game_model_matrix(poses.back(),256);
+        const auto pres=older?presentation_scene_matrix(*older,previous,current,alpha,prefs):presentation_scene_matrix(previous,current,alpha,prefs);
+        const auto p=point(pres,{model[12],model[13],model[14],1});
+        return std::array<double,3>{p[0],p[1],p[2]};
+    };
+    const auto distance=[](auto a,auto b) {return std::hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);};
+    const std::array<std::array<int32_t,3>,2> statics{{{32740,-200,9000},{-32000,400,3000}}};
+    for(bool follow:{false,true}) {
+        PresentationPreferences prefs;prefs.cockpit=true;prefs.follow_ship_rotation=follow;
+        // Uniform translation across the 16-bit wrap: the B-spline is the linear path half a tick later.
+        const auto steady=[](double k) {return std::array<double,3>{32700+60*k,-10*k,250*k};};
+        const auto still=[](double) {return .3;};
+        const auto s0=tick(0,steady,still),s1=tick(1,steady,still),s2=tick(2,steady,still);
+        for(double alpha:{0.,.25,.5})for(const auto& x:statics) {
+            require(distance(eye(&s0,s1,s2,alpha,prefs,x),eye(nullptr,s0,s1,alpha+.5,prefs,x))<1e-3,
+                "Cockpit smoothing is not the linear path half a tick later");
+            require(presentation_instrument_matrix(s0,s1,s2,alpha,prefs)==presentation_instrument_matrix(s0,s1,alpha+.5,prefs),
+                "Smoothed cabin left the smoothed pilot");
+        }
+        // Accelerating, turning flight: position and velocity stay continuous across a
+        // tick, where the linear path changes velocity abruptly.
+        const auto speeding=[](double k) {return std::array<double,3>{40*k*k,-15*k*k,250*k+30*k*k};};
+        const auto turning=[](double k) {return .02*k*k;};
+        const auto t0=tick(0,speeding,turning),t1=tick(1,speeding,turning),t2=tick(2,speeding,turning),t3=tick(3,speeding,turning);
+        constexpr double h=1e-2; // larger than Q15 rotation rounding, smaller than the curvature
+        for(const auto& x:statics) {
+            const auto end=eye(&t0,t1,t2,1,prefs,x),start=eye(&t1,t2,t3,0,prefs,x);
+            require(distance(end,start)<1e-3,"Cockpit smoothing jumps at a tick");
+            const auto before=eye(&t0,t1,t2,1-h,prefs,x),after=eye(&t1,t2,t3,h,prefs,x);
+            std::array<double,3> v0{},v1{};for(unsigned i=0;i<3;++i) {v0[i]=(end[i]-before[i])/h;v1[i]=(after[i]-start[i])/h;}
+            const auto lin_end=eye(nullptr,t1,t2,1,prefs,x),lin_before=eye(nullptr,t1,t2,1-h,prefs,x);
+            const auto lin_start=eye(nullptr,t2,t3,0,prefs,x),lin_after=eye(nullptr,t2,t3,h,prefs,x);
+            std::array<double,3> l0{},l1{};for(unsigned i=0;i<3;++i) {l0[i]=(lin_end[i]-lin_before[i])/h;l1[i]=(lin_after[i]-lin_start[i])/h;}
+            require(distance(l0,l1)>10*distance(v0,v1) && distance(v0,v1)<.05*std::hypot(v0[0],v0[1],v0[2]),
+                "Cockpit smoothing does not keep velocity continuous across ticks");
+        }
+        // A cut before previous restarts there; a cut before current jumps like the linear path.
+        const auto c0=tick(0,steady,still,true);
+        for(const auto& x:statics) {
+            require(distance(eye(&c0,s1,s2,0,prefs,x),eye(nullptr,s1,s2,0,prefs,x))<1e-3,"Smoothing replayed a cut");
+            require(distance(eye(&s0,c0,s2,.3,prefs,x),eye(nullptr,c0,s2,.3,prefs,x))<1e-3,"Smoothing crossed a cut");
+        }
+        auto off=prefs;off.cockpit=false;
+        require(presentation_scene_matrix(t0,t1,t2,.4,off)==presentation_scene_matrix(t1,t2,.4,off)
+            && presentation_instrument_matrix(t0,t1,t2,.4,off)==identity_matrix,"Smoothing changed a non-cockpit view");
+    }
 }
 template<typename T> T handle(uintptr_t n) {return reinterpret_cast<T>(n);}
 struct Fake {
@@ -355,6 +433,7 @@ int main() try {
     require(quad.acquire()==ImageWait::waiting && !quad.image_index(),"Quad timeout exposed image");
     require(quad.cancel()==ImageWait::waiting,"Quad cancellation released unwaited image");
     image_pending=false;require(quad.cancel()==ImageWait::ready && !quad.layer(session.space(),{}),"Cancelled quad submitted");
+    verify_cockpit_smoothing();
     std::cout<<"Presentation camera, source HUD grouping and fenced projection+quad tests passed (no headset).\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
