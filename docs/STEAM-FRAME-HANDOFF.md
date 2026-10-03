@@ -1347,3 +1347,18 @@ command start to the end of its pre-pass (a third timestamp query). If gpu0 − 
 ≈ pre, the gap is compute: batch the model dispatches by stage to cut about 5N
 barriers to 5. If gpu0 ≈ gpu1, the gap is serialisation: submit eye 1 without
 waiting for eye 0's fence.
+
+### Per-eye result (October 4, morning)
+
+`e06ac88` was installed and run unattended on LEVEL1_1 at 90 Hz for 90 s. Log:
+`build/frame-devkit/runs/e06ac88-forced-LEVEL1_1-90hz-pereye.log`. The runtime
+now recommended 2016x2016 eye buffers, not the 2160x2160 seen overnight.
+- `gpu_eyes` 5.5–7.9 / 5.9–8.4 ms: both eyes cost the same on the GPU.
+- `pre` (eye 0's compute pre-pass) is 0.10–0.31 ms. It is not the eye 0 gap.
+- Eye 0 submit-to-fence CPU time is still about 10–12 ms against 6–9 ms for eye 1.
+  The extra 3–5 ms is waiting, not GPU work. It comes from the serial
+  submit-wait-submit eye loop and queueing behind the compositor at frame start.
+- The summed GPU time (11.4–16.2 ms) still exceeds the 11.1 ms budget at 100%, so
+  90 Hz at full resolution stays GPU-bound. At 75–80% the GPU fits, and removing
+  the serial wait (submitting eye 1 without waiting for eye 0's fence) is the next
+  fix. The compute-barrier batching is not worth doing.
