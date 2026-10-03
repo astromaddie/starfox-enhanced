@@ -23,7 +23,7 @@ void VulkanEyeCommands::close() noexcept {
     if(fence_) destroy_fence_(device_,fence_,nullptr);
     if(pool_) destroy_pool_(device_,pool_,nullptr);
     device_={};queue_={};pool_={};command_={};fence_={};query_pool_={};pending_=failed_=false;
-    timestamps_active_=false;timestamp_valid_bits_=0;timestamp_period_ns_=0.;gpu_duration_ms_.reset();
+    timestamps_active_=pre_pass_marked_=false;timestamp_valid_bits_=0;timestamp_period_ns_=0.;gpu_duration_ms_.reset();pre_pass_ms_.reset();
     destroy_query_pool_=nullptr;reset_query_pool_=nullptr;write_timestamp_=nullptr;get_query_results_=nullptr;
     timestamp_status_="GPU timestamps not initialized";
 }
@@ -72,7 +72,7 @@ bool VulkanEyeCommands::initialize(VkDevice device,VkQueue queue,uint32_t family
                 timestamp_status_="unavailable: Vulkan timestamp query entry point missing";
             } else {
                 VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-                query.queryType=VK_QUERY_TYPE_TIMESTAMP;query.queryCount=2;
+                query.queryType=VK_QUERY_TYPE_TIMESTAMP;query.queryCount=3;
                 const auto created=create_query_pool(device,&query,nullptr,&query_pool_);
                 if(created!=VK_SUCCESS) {
                     query_pool_={};
@@ -93,7 +93,11 @@ bool VulkanEyeCommands::submit(const VulkanEyeTargets& targets,unsigned eye,unsi
         status_="Eye framebuffer is not ready";return false;
     }
     return submit_work(targets.extent(eye),[&](VkCommandBuffer command,VkExtent2D extent) {
-        if(before_render) before_render(command,extent);
+        if(before_render) {
+            before_render(command,extent);
+            // Third timestamp: GPU time of the pre-pass (eye 0's compute) alone.
+            if(timestamps_active_) {write_timestamp_(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,query_pool_,2);pre_pass_marked_=true;}
+        }
         std::array<VkClearValue,2> clear{};clear[0].color=color;clear[1].depthStencil={1.0F,0};
         VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         pass.renderPass=targets.render_pass();pass.framebuffer=targets.framebuffer(eye,image);
@@ -115,8 +119,9 @@ bool VulkanEyeCommands::submit_work(VkExtent2D extent,const Record& record,const
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         begin.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check(begin_(command_,&begin),"Begin eye commands");
+        pre_pass_marked_=false;
         if(timestamps_active_) {
-            reset_query_pool_(command_,query_pool_,0,2);
+            reset_query_pool_(command_,query_pool_,0,3);
             write_timestamp_(command_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,query_pool_,0);
         }
         record(command_,extent);
@@ -144,7 +149,15 @@ VulkanEyeCommands::Completion VulkanEyeCommands::poll(uint64_t timeout_ns) {
         timeout_ns>1000000?1000000:timeout_ns):fence_status_(device_,fence_);
     if(result==VK_NOT_READY || result==VK_TIMEOUT) return Completion::pending;
     if(result==VK_SUCCESS) {
-        pending_=false;gpu_duration_ms_.reset();
+        pending_=false;gpu_duration_ms_.reset();pre_pass_ms_.reset();
+        if(timestamps_active_ && pre_pass_marked_) {
+            std::array<std::uint64_t,4> values{};
+            if(get_query_results_(device_,query_pool_,0,1,sizeof(values),values.data(),2*sizeof(std::uint64_t),
+                VK_QUERY_RESULT_64_BIT|VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)==VK_SUCCESS && values[1]
+                && get_query_results_(device_,query_pool_,2,1,sizeof(values)/2,values.data()+2,2*sizeof(std::uint64_t),
+                VK_QUERY_RESULT_64_BIT|VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)==VK_SUCCESS && values[3])
+                pre_pass_ms_=timestamp_duration_ms(values[0],values[2],timestamp_valid_bits_,timestamp_period_ns_);
+        }
         if(timestamps_active_) {
             std::array<std::uint64_t,4> values{};
             const auto query_result=get_query_results_(device_,query_pool_,0,2,sizeof(values),values.data(),

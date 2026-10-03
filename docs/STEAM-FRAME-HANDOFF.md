@@ -1332,3 +1332,18 @@ as preferences v10 (byte 29; v1–v9 load as 100%). Eye buffers are created at
 launch, so the application reads the saved choice before creating swapchains, and
 the row shows NEXT LAUNCH until a relaunch applies it.
 `SFX_VR_RESOLUTION_SCALE` (0.5–1) overrides it and shows as "<n>% ENV".
+
+### Per-eye GPU and pre-pass timing (October 4)
+
+A read-only investigation found that the only GPU work exclusive to eye 0 is the
+compute pre-pass (`VulkanSourceScene::record_compute`). That covers connected-grid
+compute every frame, plus up to five serial dispatches with a full barrier after
+each, for every dirty source model. It also found that the eyes are fully
+serialised: eye 1 is not acquired until eye 0's fence completes. Submit-to-fence
+CPU time also includes queueing and clock ramp-up, so the eye 0 gap may not be
+GPU work. With `SFX_VR_TIMING_GPU=1`, `[vr-perf]` now appends
+`gpu_eyes=<eye0>/<eye1>ms` and `pre=<ms>`. `pre` is the GPU time from eye 0's
+command start to the end of its pre-pass (a third timestamp query). If gpu0 − gpu1
+≈ pre, the gap is compute: batch the model dispatches by stage to cut about 5N
+barriers to 5. If gpu0 ≈ gpu1, the gap is serialisation: submit eye 1 without
+waiting for eye 0's fence.

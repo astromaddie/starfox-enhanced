@@ -15,6 +15,7 @@ public:
     struct EyeTiming {
         double submit_to_fence_cpu_ms{};
         std::optional<double> gpu_timestamp_ms;
+        std::optional<double> pre_pass_gpu_ms;
     };
     // CPU elapsed submission-to-fence-observation time, including polling
     // delays. This is intentionally not labelled GPU timestamp time.

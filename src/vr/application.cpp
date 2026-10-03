@@ -746,6 +746,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         std::optional<double> logic_ms,models_ms,upload_ms,layers_ms;
     } cpu_frame_profile;
     std::array<std::optional<starfox::vr::VulkanStereoDraw::EyeTiming>,2> eye_frame_profile;
+    std::array<double,2> gpu_eye_sum{};std::array<unsigned,2> gpu_eye_frames{};
+    double pre_pass_sum=0;unsigned pre_pass_frames=0;
     std::optional<starfox::vr::VulkanStereoDraw::EyeTiming> ui_frame_profile;
     std::optional<std::chrono::steady_clock::time_point> last_profiled_submission;
     std::string game_error;
@@ -1760,6 +1762,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 for(unsigned eye_index=0;eye_index<2;++eye_index) if(eye_frame_profile[eye_index]) {
                     frame.eye_ms[eye_index]=eye_frame_profile[eye_index]->submit_to_fence_cpu_ms;
                     frame.gpu_ms[eye_index]=eye_frame_profile[eye_index]->gpu_timestamp_ms;
+                    if(const auto gpu=eye_frame_profile[eye_index]->gpu_timestamp_ms) {gpu_eye_sum[eye_index]+=*gpu;++gpu_eye_frames[eye_index];}
+                    if(const auto pre=eye_frame_profile[eye_index]->pre_pass_gpu_ms) {pre_pass_sum+=*pre;++pre_pass_frames;}
                 }
                 perf_log.add_frame(now_s,frame);
                 perf_window_forced|=renderer.last_frame_forced();
@@ -1772,6 +1776,11 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 if(const auto line=perf_log.poll(now_s)) {
                     std::ostringstream rate;
                     if(refresh_rate.current()) rate<<" display="<<*refresh_rate.current()<<"Hz";
+                    // Per-eye GPU and eye 0's compute pre-pass, to separate fixed from per-pixel cost.
+                    if(gpu_eye_frames[0] && gpu_eye_frames[1]) rate<<std::fixed<<std::setprecision(2)
+                        <<" gpu_eyes="<<gpu_eye_sum[0]/gpu_eye_frames[0]<<'/'<<gpu_eye_sum[1]/gpu_eye_frames[1]<<"ms";
+                    if(pre_pass_frames) rate<<" pre="<<pre_pass_sum/pre_pass_frames<<"ms";
+                    gpu_eye_sum={};gpu_eye_frames={};pre_pass_sum=0;pre_pass_frames=0;
                     if(perf_window_forced) rate<<" forced=1";
                     perf_window_forced=false;
                     session_log(*line+rate.str());

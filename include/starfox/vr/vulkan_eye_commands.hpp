@@ -36,6 +36,10 @@ public:
     std::optional<double> take_gpu_duration_ms() noexcept {
         auto result=gpu_duration_ms_;gpu_duration_ms_.reset();return result;
     }
+    // GPU time from command start to the end of before_render, when it ran.
+    std::optional<double> take_pre_pass_ms() noexcept {
+        auto result=pre_pass_ms_;pre_pass_ms_.reset();return result;
+    }
     static std::optional<double> timestamp_duration_ms(std::uint64_t begin,std::uint64_t end,
         std::uint32_t valid_bits,double period_ns) noexcept;
     void close() noexcept;
@@ -48,7 +52,8 @@ private:
     bool timestamps_active_{};
     std::uint32_t timestamp_valid_bits_{};
     double timestamp_period_ns_{};
-    std::optional<double> gpu_duration_ms_;
+    std::optional<double> gpu_duration_ms_,pre_pass_ms_;
+    bool pre_pass_marked_{};
     PFN_vkDestroyCommandPool destroy_pool_{};
     PFN_vkDestroyFence destroy_fence_{};
     PFN_vkQueueWaitIdle idle_{};

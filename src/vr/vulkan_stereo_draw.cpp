@@ -32,6 +32,7 @@ StereoRenderer::EyeResult VulkanStereoDraw::draw(unsigned eye,uint32_t image,
         if(elapsed>timing_.maximum_ms) timing_.maximum_ms=elapsed;
         last_eye_timing_.submit_to_fence_cpu_ms=elapsed;
         last_eye_timing_.gpu_timestamp_ms=commands_.take_gpu_duration_ms();
+        last_eye_timing_.pre_pass_gpu_ms=commands_.take_pre_pass_ms();
         submitted_=false;return Result::complete;
     }
     }
