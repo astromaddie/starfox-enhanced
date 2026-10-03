@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <optional>
+#include <sstream>
 #include <string>
 
 namespace starfox::vr {
@@ -14,7 +15,8 @@ namespace starfox::vr {
 //
 // This port honours: haptics (SFX_VR_HAPTICS, 0..1), refresh_rate
 // (SFX_VR_REFRESH_RATE, Hz) and timing_gpu (SFX_VR_TIMING_GPU, 0/1). Other
-// registry keys are not implemented by this port and are ignored.
+// registry keys are not implemented by this port and are ignored, except the
+// unattended diagnostics below.
 using EnvGetter=const char*(*)(const char*);
 inline const char* process_getenv(const char* name) noexcept {return std::getenv(name);}
 
@@ -46,5 +48,35 @@ inline std::optional<bool> env_override_bool(const char* key,
     const int value=sfvr_settings_parse_bool(text->c_str(),-1);
     if(value<0) return std::nullopt;
     return value!=0;
+}
+// Unattended diagnostics, env only (never in the menu or the saved file):
+// force_render (SFX_VR_FORCE_RENDER, 0/1) renders and plays in standby or
+// unfocused; diag_yaw (SFX_VR_DIAG_YAW, degrees about +Y, -360..360) turns the
+// rendered head; autostart (SFX_VR_AUTOSTART, e.g. LEVEL1_1) skips the startup
+// menu; exit_after (SFX_VR_EXIT_AFTER, seconds in game, not a registry key)
+// quits through QUIT TO STEAM. Unset or unparseable leaves each one off.
+struct DiagnosticOverrides {
+    bool force_render{};
+    float yaw_degrees{};
+    std::optional<std::string> autostart;
+    std::optional<float> exit_after_seconds;
+    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds;}
+    std::string describe() const {
+        std::ostringstream line;line<<"[vr] diagnostic overrides:";
+        if(force_render) line<<" force_render=1";
+        if(yaw_degrees!=0) line<<" diag_yaw="<<yaw_degrees;
+        if(autostart) line<<" autostart="<<*autostart;
+        if(exit_after_seconds) line<<" exit_after="<<*exit_after_seconds<<'s';
+        return line.str();
+    }
+};
+inline DiagnosticOverrides diagnostic_overrides(EnvGetter getter=process_getenv) {
+    DiagnosticOverrides result;
+    result.force_render=env_override_bool("force_render",getter).value_or(false);
+    result.yaw_degrees=env_override_float("diag_yaw",getter).value_or(0.F);
+    result.autostart=env_override_text("autostart",getter);
+    if(const auto seconds=env_override_float("exit_after",getter); seconds && *seconds>0)
+        result.exit_after_seconds=seconds;
+    return result;
 }
 }

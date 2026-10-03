@@ -48,6 +48,12 @@ private:
     float yaw_{},height_{};
     bool capture_heading_{},keep_height_{};
 };
+// SFX_VR_FORCE_RENDER without tracking: a straight-ahead head at the LOCAL
+// origin, 63 mm IPD and a symmetric 100 x 96 degree field per eye.
+std::array<XrView,2> synthetic_stereo_views() noexcept;
+// SFX_VR_DIAG_YAW: turn both eyes about +Y (positive turns left) through their
+// midpoint, keeping the IPD and FOV. Non-finite angles are ignored.
+void rotate_views_yaw(std::array<XrView,2>&,float radians) noexcept;
 // Pose translation is in metres; units_per_metre converts it to the scene's
 // units. Near/far are already in scene units. nullopt far selects an infinite
 // far plane. Invalid/non-finite tracking or projection inputs are rejected.

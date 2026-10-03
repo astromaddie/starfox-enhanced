@@ -27,6 +27,29 @@ std::optional<std::array<EyeCamera,2>> sbs_eye_cameras(float vertical_fov,
     }
     return result;
 }
+std::array<XrView,2> synthetic_stereo_views() noexcept {
+    std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
+    constexpr float degree=std::numbers::pi_v<float>/180;
+    for(unsigned eye=0;eye<2;++eye) {
+        views[eye].pose.orientation={0,0,0,1};
+        views[eye].pose.position={eye?.0315F:-.0315F,0,0};
+        views[eye].fov={-50*degree,50*degree,48*degree,-48*degree};
+    }
+    return views;
+}
+void rotate_views_yaw(std::array<XrView,2>& views,float radians) noexcept {
+    if(!std::isfinite(radians) || radians==0) return;
+    const float c=std::cos(radians),s=std::sin(radians);
+    const float hc=std::cos(radians*.5F),hs=std::sin(radians*.5F);
+    const float cx=(views[0].pose.position.x+views[1].pose.position.x)*.5F;
+    const float cz=(views[0].pose.position.z+views[1].pose.position.z)*.5F;
+    for(auto& eye:views) {
+        const float x=eye.pose.position.x-cx,z=eye.pose.position.z-cz;
+        eye.pose.position.x=cx+c*x+s*z;eye.pose.position.z=cz-s*x+c*z;
+        const auto q=eye.pose.orientation; // Yaw * q: the turn applies in LOCAL space.
+        eye.pose.orientation={hc*q.x+hs*q.z,hc*q.y+hs*q.w,hc*q.z-hs*q.x,hc*q.w-hs*q.y};
+    }
+}
 bool PositionAnchor::apply(std::array<XrView,2>& views,float translation_scale) noexcept {
     if(!std::isfinite(translation_scale) || translation_scale<0 || translation_scale>2) return false;
     for(const auto& eye:views) for(float value:{eye.pose.position.x,eye.pose.position.y,eye.pose.position.z})

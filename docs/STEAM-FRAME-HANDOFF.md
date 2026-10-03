@@ -939,6 +939,10 @@ range. An override wins over the saved preference and is never written to
 | `SFX_VR_HAPTICS` | Haptics strength 0..1 (default from the saved setting, 0.6). The menu row shows `NN% ENV` while it is set, and changing it there has no effect |
 | `SFX_VR_TIMING_GPU` | `1`/`true`/`on` enables GPU timestamp queries, which fills `gpu=` in `[vr-perf]`; default off (also on with `--profile-csv`) |
 | `SFX_VR_REFRESH_RATE` | Target display refresh in Hz, default 90 (added with the refresh-rate request) |
+| `SFX_VR_FORCE_RENDER` | `1` renders and submits every frame even when the runtime says not to (headset off, standby) and runs the game while unfocused, with empty controls. Real views when valid, else a synthetic head at the LOCAL origin (63 mm IPD, ±50° x ±48°). Default off. Added October 4 |
+| `SFX_VR_DIAG_YAW` | Degrees (-360..360) to turn the rendered head about +Y, positive to the left, for stereo checks at 0/90/180°. Default 0. Added October 4 |
+| `SFX_VR_AUTOSTART` | A level name such as `LEVEL1_1` (any case): skips the startup menu and starts that level as the level-select cheat would. An unknown name is logged and the menu shows. Not a registry key. Added October 4 |
+| `SFX_VR_EXIT_AFTER` | Seconds after the first in-game frame; then quits through the QUIT TO STEAM path. Not a registry key. Added October 4 |
 
 No other registry key is implemented by this port, so no other variable has any
 effect.
@@ -1192,3 +1196,63 @@ as before. All files match by SHA-256 (`starfox_steamframe` `a77cefbe…e4c4`). 
 device metadata names a clean `b7bcd63`, the game was not running and was not
 launched, and user data and Steam settings are unchanged. The `1b5cb83` runtime
 is kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
+
+## Unattended diagnostics (October 4)
+
+Goal: measure frame time at 90 and 120 Hz with nobody wearing the Frame. Off
+the head, SteamVR reports `shouldRender=false` and the session is not FOCUSED,
+so the port skipped every frame and paused the game. Four env overrides (table
+above) change that, and all of them are off unless set. Unset, the code paths
+are the same as before.
+
+- `SFX_VR_FORCE_RENDER=1`: `OpenXrSession::begin_frame` still locates views when
+  the runtime does not want the frame, never throws for that, and falls back to
+  `synthetic_stereo_views()` when they are invalid. Such frames are marked
+  `StereoFrame::forced` and submitted with their projection and panel layers.
+  The OpenXR spec lets an app submit layers when `shouldRender` is false; the
+  runtime may just not show them. If the runtime refuses the layers anyway,
+  the session ends that frame empty, keeps going, and logs `[vr] runtime refused
+  forced layers` once. The game counts as focused for simulation and menus, so
+  the 20 Hz game runs and audio plays, with empty controls. A worn headset
+  still uses real views and real input.
+- `SFX_VR_DIAG_YAW=<deg>` turns only the scene cameras, about the eyes' midpoint
+  and after the position anchor. The submitted layer keeps the real pose, so
+  the compositor shows the turned view straight ahead. The menu panel is not
+  turned.
+- `SFX_VR_AUTOSTART=LEVEL1_1` picks that level from the cartridge's level list
+  (the same list as the CHEATS level row) and closes the startup menu on the
+  first frame, so the saved settings apply as on START. It does not switch
+  between Original and EX.
+- `SFX_VR_EXIT_AFTER=<s>` sets the QUIT TO STEAM request once that many seconds
+  have passed since the first submitted in-game frame (`session.request_exit`,
+  then the bounded 2 s wait). It never fires while the startup menu is open.
+
+With any of them set, one `[vr] diagnostic overrides: ...` line goes to stdout
+and `vr-session.log` at startup. A `[vr-perf]` window with any forced frame
+ends in ` forced=1`.
+
+Unattended capture, for example 120 Hz on Corneria for 60 s: set the env for the
+title's launch (for example as a prefix in the Devkit launcher arguments, or a
+temporary wrapper that exports them and runs `LAUNCH-STEAM-FRAME.sh`), launch
+through Steam as usual, then read
+`~/.local/share/StarFoxEnhanced/vr-session.log`.
+
+```
+SFX_VR_FORCE_RENDER=1 SFX_VR_AUTOSTART=LEVEL1_1 SFX_VR_EXIT_AFTER=60 \
+SFX_VR_REFRESH_RATE=120 SFX_VR_TIMING_GPU=1 ./LAUNCH-STEAM-FRAME.sh
+```
+
+Add `SFX_VR_DIAG_YAW=90` (or 180) for turned views. Tests cover the synthetic
+views (IPD, orientation, FOV, projection), the yaw turn, forced frames against
+the injected session (standby, untracked, failed location, refused layers,
+forcing off), the renderer with a forced and turned frame, env parsing with
+everything unset, and autostart name matching. The new session cases pass on
+the Mac; `starfox_vr_session_check` still aborts later, at the existing
+locate-failure case, as before this change.
+
+Untested on the device: whether SteamVR on the Frame accepts and paces layers
+while `shouldRender` is false (WipEout VR's `force_render` also submits them,
+and its unattended run on October 2 held 72 fps, which is encouraging), whether it honours a
+refresh request in standby, whether it throttles `xrWaitFrame` while the
+headset is off the head (then the numbers are not the worn numbers), and how
+the env reaches the process through the Devkit launcher.

@@ -28,6 +28,9 @@ public:
         recenter_pending_=true;recenter_height_pending_|=recalibrate_height;
     }
     void set_head_translation(float scale) noexcept {head_translation_=scale;}
+    // SFX_VR_DIAG_YAW: turns the scene cameras only; the submitted layer keeps
+    // the real pose, so the compositor shows the turned view straight ahead.
+    void set_diag_yaw(float radians) noexcept {diag_yaw_=radians;}
     StereoRenderer(OpenXrSession& session, OpenXrSwapchains& images,bool anchor_position=false)
         :session_(session),images_(images),anchor_position_(anchor_position) {}
     enum class Result {idle, waiting, submitted, skipped, error};
@@ -38,6 +41,8 @@ public:
     bool frame_pending() const noexcept {return frame_.has_value();}
     // The runtime's predicted display period for the most recent frame begun (ns; 0 before any).
     XrDuration display_period() const noexcept {return display_period_;}
+    // Whether the most recent frame begun was forced (SFX_VR_FORCE_RENDER).
+    bool last_frame_forced() const noexcept {return forced_;}
     bool teardown_required() const noexcept {return fatal_;}
     XrPosef anchored_pose(XrPosef pose) const noexcept {return anchor_position_?position_anchor_.anchored(pose):pose;}
 private:
@@ -48,9 +53,9 @@ private:
     unsigned next_eye_{};
     bool cancelling_{};
     XrDuration display_period_{};
-    bool fatal_{};
+    bool fatal_{},forced_{};
     bool anchor_position_{};
-    bool recenter_pending_{},recenter_height_pending_{};float head_translation_{1.F};
+    bool recenter_pending_{},recenter_height_pending_{};float head_translation_{1.F},diag_yaw_{};
     PositionAnchor position_anchor_;
 };
 }

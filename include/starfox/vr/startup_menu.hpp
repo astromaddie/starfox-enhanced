@@ -8,6 +8,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <span>
 namespace starfox::vr {
@@ -148,6 +149,15 @@ public:
     }
     std::string level_name() const {
         return selected_level?"LEVEL"+std::to_string(selected_level/10)+"_"+std::to_string(selected_level%10):"OFF";
+    }
+    // SFX_VR_AUTOSTART: the level-select choice a name spells (LEVEL1_1, any
+    // case), only if that cartridge's menu offers it.
+    std::optional<unsigned> level_choice(std::string_view name,bool on_extended) const {
+        std::string upper(name);
+        for(auto& c:upper) if(c>='a' && c<='z') c=char(c-'a'+'A');
+        for(const unsigned choice:level_choices[on_extended?1:0])
+            if(choice && upper=="LEVEL"+std::to_string(choice/10)+"_"+std::to_string(choice%10)) return choice;
+        return std::nullopt;
     }
     void open_runtime() noexcept {
         runtime=true;open=true;page=Page::main;selection=4;selected_level=0;

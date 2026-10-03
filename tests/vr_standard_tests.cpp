@@ -185,9 +185,53 @@ void refresh_rates() {
     fake_rates={72.F,80.F,90.F,120.F};
 }
 }
+void diagnostic_env() {
+    // Unset: every diagnostic off, so the normal launch is unchanged.
+    fake_env.clear();
+    auto diag=diagnostic_overrides(fake_getenv);
+    require(!diag.active() && !diag.force_render && diag.yaw_degrees==0 && !diag.autostart && !diag.exit_after_seconds);
+    // Unrelated standard keys do not turn diagnostics on.
+    fake_env["SFX_VR_HAPTICS"]="0.5";fake_env["SFX_VR_TIMING_GPU"]="1";
+    require(!diagnostic_overrides(fake_getenv).active());
+    fake_env["SFX_VR_FORCE_RENDER"]="1";fake_env["SFX_VR_DIAG_YAW"]="90";
+    fake_env["SFX_VR_AUTOSTART"]=" LEVEL1_1 ";fake_env["SFX_VR_EXIT_AFTER"]="60";
+    diag=diagnostic_overrides(fake_getenv);
+    require(diag.active() && diag.force_render && diag.yaw_degrees==90.F
+        && diag.autostart==std::string("LEVEL1_1") && diag.exit_after_seconds==60.F);
+    require(diag.describe()=="[vr] diagnostic overrides: force_render=1 diag_yaw=90 autostart=LEVEL1_1 exit_after=60s");
+    // Off, garbage, out of range, zero or negative: each falls back on its own.
+    fake_env["SFX_VR_FORCE_RENDER"]="0";fake_env["SFX_VR_DIAG_YAW"]="720";
+    fake_env["SFX_VR_AUTOSTART"]="  ";fake_env["SFX_VR_EXIT_AFTER"]="0";
+    diag=diagnostic_overrides(fake_getenv);
+    require(!diag.force_render && diag.yaw_degrees==360.F && !diag.autostart && !diag.exit_after_seconds);
+    require(diag.describe()=="[vr] diagnostic overrides: diag_yaw=360");
+    fake_env["SFX_VR_FORCE_RENDER"]="please";fake_env["SFX_VR_DIAG_YAW"]="left";fake_env["SFX_VR_EXIT_AFTER"]="-5";
+    require(!diagnostic_overrides(fake_getenv).active());
+    fake_env["SFX_VR_EXIT_AFTER"]="1e9";
+    require(diagnostic_overrides(fake_getenv).exit_after_seconds==1e9F); // Not a registry key: unclamped.
+    char name[64];
+    require(sfvr_settings_env_name("SFX","exit_after",name,sizeof name) && std::strcmp(name,"SFX_VR_EXIT_AFTER")==0);
+    fake_env.clear();
+}
+void autostart_levels() {
+    StartupMenu menu;
+    menu.level_choices={{{0,11,12,13,21,31},{0,11,12,71}}};
+    require(menu.level_choice("LEVEL1_1",false)==11U);
+    require(menu.level_choice("level3_1",false)==31U); // Any case.
+    require(menu.level_choice("LEVEL7_1",true)==71U);
+    // Only the given cartridge's levels; OFF, junk and partial names miss.
+    require(!menu.level_choice("LEVEL7_1",false) && !menu.level_choice("LEVEL2_1",true));
+    for(const char* bad:{"","OFF","LEVEL0_0","LEVEL1_","LEVEL1_11","LEVEL11","INTROMAP"," LEVEL1_1"})
+        require(!menu.level_choice(bad,false));
+    // The names match what the level-select cheat shows.
+    menu.selected_level=13;require(menu.level_choice(menu.level_name(),false)==13U);
+    StartupMenu empty;require(!empty.level_choice("LEVEL1_1",false));
+}
 int main() try {
     perf_line();
     env_overrides();
+    diagnostic_env();
+    autostart_levels();
     refresh_rates();
-    std::cout<<"VR standard units passed (perf line, env overrides, refresh rate)\n";
+    std::cout<<"VR standard units passed (perf line, env overrides, diagnostics, autostart, refresh rate)\n";
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

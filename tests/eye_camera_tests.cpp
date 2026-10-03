@@ -24,6 +24,47 @@ std::array<float,4> project(const Matrix4& m,std::array<float,4> p) {
 int main() {
     try {
         {
+            // SFX_VR_FORCE_RENDER: 63 mm apart at the LOCAL origin, facing -Z,
+            // with a symmetric 100 x 96 degree field.
+            const auto views=synthetic_stereo_views();
+            const float degree=std::acos(-1.F)/180;
+            for(unsigned eye=0;eye<2;++eye) {
+                const auto& v=views[eye];
+                require(v.type==XR_TYPE_VIEW);
+                close(v.pose.position.x,eye?.0315F:-.0315F);close(v.pose.position.y,0);close(v.pose.position.z,0);
+                close(v.pose.orientation.x,0);close(v.pose.orientation.y,0);close(v.pose.orientation.z,0);close(v.pose.orientation.w,1);
+                close(v.fov.angleLeft,-50*degree);close(v.fov.angleRight,50*degree);
+                close(v.fov.angleUp,48*degree);close(v.fov.angleDown,-48*degree);
+                const auto c=eye_camera(v,1,.1F);require(c.has_value());
+                // Straight ahead projects to the centre; the eye sits at its own x.
+                const auto centre=project(c->projection,transform(c->view,{v.pose.position.x,0,-5,1}));
+                close(centre[0],0);close(centre[1],0);
+                const auto edge=project(c->projection,transform(c->view,{v.pose.position.x+std::tan(50*degree),0,-1,1}));
+                close(edge[0],1);
+            }
+            // SFX_VR_DIAG_YAW: +90 degrees turns forward (-Z) to -X about the
+            // eyes' midpoint, keeping the IPD; 180 swaps the eyes' sides.
+            auto turned=views;
+            for(auto& eye:turned) eye.pose.position={eye.pose.position.x+1,1.6F,2};
+            const float quarter=std::acos(-1.F)/2;
+            rotate_views_yaw(turned,quarter);
+            close(turned[0].pose.position.x,1);close(turned[0].pose.position.z,2.0315F);
+            close(turned[1].pose.position.x,1);close(turned[1].pose.position.z,1.9685F);
+            close(turned[0].pose.position.y,1.6F);
+            close(turned[0].fov.angleLeft,views[0].fov.angleLeft);
+            const auto c=eye_camera(turned[0],1,.1F);require(c.has_value());
+            const auto ahead=transform(c->view,{turned[0].pose.position.x-3,1.6F,turned[0].pose.position.z,1});
+            close(ahead[0],0);close(ahead[1],0);close(ahead[2],-3);
+            auto half=views;rotate_views_yaw(half,2*quarter);
+            close(half[0].pose.position.x,.0315F);close(half[1].pose.position.x,-.0315F);
+            close(std::abs(half[0].pose.orientation.y),1);close(half[0].pose.orientation.w,0);
+            // Composes with an existing turn and ignores zero or non-finite angles.
+            auto twice=views;rotate_views_yaw(twice,quarter);rotate_views_yaw(twice,quarter);
+            close(twice[0].pose.position.x,half[0].pose.position.x);close(twice[0].pose.orientation.y,half[0].pose.orientation.y);
+            auto same=views;rotate_views_yaw(same,0);rotate_views_yaw(same,std::numeric_limits<float>::quiet_NaN());
+            close(same[0].pose.position.x,views[0].pose.position.x);close(same[0].pose.orientation.w,1);
+        }
+        {
             const auto panel=panel_matrix();close(panel[0]*256,1.15F);close(panel[14],-1.75F);
             std::array<XrView,2> views{};
             for(unsigned eye=0;eye<2;++eye) {

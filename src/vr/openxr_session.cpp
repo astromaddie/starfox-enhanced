@@ -1,4 +1,5 @@
 #include "starfox/vr/openxr_session.hpp"
+#include "starfox/vr/eye_camera.hpp"
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -19,7 +20,7 @@ void OpenXrSession::close() noexcept {
     if(space_!=XR_NULL_HANDLE) api_.destroy_space(space_);
     if(session_!=XR_NULL_HANDLE) api_.destroy_session(session_);
     instance_=XR_NULL_HANDLE;session_=XR_NULL_HANDLE;space_=XR_NULL_HANDLE;
-    running_=exit_=frame_active_=renderable_=exit_asked_=false;
+    running_=exit_=frame_active_=renderable_=exit_asked_=forced_=false;
     state_=XR_SESSION_STATE_UNKNOWN;frame_time_=0;
     origin_changes_.clear();
 }
@@ -100,7 +101,7 @@ std::optional<StereoFrame> OpenXrSession::begin_frame() {
         check(api_.wait_frame(session_,&wait,&timing),"Wait for XR frame");
         XrFrameBeginInfo begin{XR_TYPE_FRAME_BEGIN_INFO};
         check(api_.begin_frame(session_,&begin),"Begin XR frame");
-        frame_active_=true;frame_time_=timing.predictedDisplayTime;renderable_=false;
+        frame_active_=true;frame_time_=timing.predictedDisplayTime;renderable_=forced_=false;
         StereoFrame frame;frame.display_time=frame_time_;frame.display_period=timing.predictedDisplayPeriod;
         // A queued reference-space change is not effective until its time.
         // Signal even invisible frames so the next valid pose can re-anchor.
@@ -108,14 +109,19 @@ std::optional<StereoFrame> OpenXrSession::begin_frame() {
             if(time>frame_time_) return false;
             frame.tracking_origin_changed=true;return true;
         });
-        if(timing.shouldRender) {
+        if(timing.shouldRender || force_render_) {
             XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
             locate.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
             locate.displayTime=frame_time_;locate.space=space_;
             XrViewState view_state{XR_TYPE_VIEW_STATE};uint32_t count{};
-            check(api_.locate_views(session_,&locate,&view_state,2,&count,frame.views.data()),"Locate stereo eyes");
+            const auto located=api_.locate_views(session_,&locate,&view_state,2,&count,frame.views.data());
+            if(!force_render_) check(located,"Locate stereo eyes");
             const auto valid=XR_VIEW_STATE_ORIENTATION_VALID_BIT|XR_VIEW_STATE_POSITION_VALID_BIT;
-            renderable_=count==2 && (view_state.viewStateFlags&valid)==valid;
+            renderable_=XR_SUCCEEDED(located) && count==2 && (view_state.viewStateFlags&valid)==valid;
+        }
+        if(force_render_ && !(timing.shouldRender && renderable_)) {
+            if(!renderable_) frame.views=synthetic_stereo_views();
+            renderable_=forced_=frame.forced=true;
         }
         frame.should_render=renderable_;return frame;
     } catch(const std::exception& e) {
@@ -130,7 +136,16 @@ bool OpenXrSession::end_frame(std::span<const XrCompositionLayerBaseHeader* cons
     XrFrameEndInfo end{XR_TYPE_FRAME_END_INFO};end.displayTime=frame_time_;end.environmentBlendMode=blend_;
     end.layerCount=renderable_?static_cast<uint32_t>(layers.size()):0;
     end.layers=end.layerCount?layers.data():nullptr;
-    const auto result=api_.end_frame(session_,&end);frame_active_=false;renderable_=false;
+    auto result=api_.end_frame(session_,&end);
+    if(XR_FAILED(result) && forced_ && end.layerCount) {
+        // shouldRender=false permits layers, but a runtime may still refuse
+        // them; keep the forced run pacing with an empty frame.
+        ++forced_rejections_;status_="Forced layers refused: OpenXR result "+std::to_string(result);
+        end.layerCount=0;end.layers=nullptr;
+        result=api_.end_frame(session_,&end);
+        if(result==XR_ERROR_CALL_ORDER_INVALID) result=XR_SUCCESS; // The refusal already ended it.
+    }
+    frame_active_=false;renderable_=forced_=false;
     if(XR_FAILED(result)) {status_="End XR frame: OpenXR result "+std::to_string(result);return false;}
     return true;
 }

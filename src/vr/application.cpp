@@ -60,6 +60,7 @@
 #include <cmath>
 #include <charconv>
 #include <iomanip>
+#include <numbers>
 #include <sstream>
 #ifndef STARFOX_SOURCE_REVISION
 #define STARFOX_SOURCE_REVISION "unknown"
@@ -746,6 +747,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     startup.haptics_override=starfox::vr::env_override_float("haptics");
     startup.refresh_override=starfox::vr::env_override_float("refresh_rate");
     if(startup.haptics_override) std::cout<<"[vr] haptics strength overridden by SFX_VR_HAPTICS: "<<*startup.haptics_override<<'\n';
+    const auto diagnostics=starfox::vr::diagnostic_overrides();
+    session.set_force_render(diagnostics.force_render);
+    renderer.set_diag_yaw(diagnostics.yaw_degrees*std::numbers::pi_v<float>/180);
+    unsigned forced_rejections_logged=0;
+    bool diag_frame_in_game=false,perf_window_forced=false;
+    std::optional<std::chrono::steady_clock::time_point> diag_in_game_since;
     startup.ray_tracing_available=ray_supported;startup.ray_tracing=ray_tracing;
     starfox::vr::VulkanScenePipeline circle_pipeline;
     starfox::vr::VulkanSceneBuffer circle_vertices;
@@ -795,6 +802,13 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         std::cout<<line<<std::endl;
         if(session_file) session_file<<line<<std::endl;
     };
+    if(diagnostics.active()) session_log(diagnostics.describe());
+    std::optional<unsigned> autostart_level;
+    if(diagnostics.autostart) {
+        if(startup.open) autostart_level=startup.level_choice(*diagnostics.autostart,initial_extended);
+        if(!autostart_level) session_log("[vr] SFX_VR_AUTOSTART="+*diagnostics.autostart
+            +(startup.open?" is not a level on this cartridge; showing the startup menu":" ignored: no startup menu"));
+    }
     if(startup.open && !preferences_path.empty()) try {
         if(std::filesystem::exists(preferences_path)) {
             const auto size=std::filesystem::file_size(preferences_path);
@@ -882,7 +896,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 input_time=time;if(controls.menu_pressed) ++menu_presses;
                 if(live) try {
                     const auto profile_start=std::chrono::steady_clock::now();
-                    const bool focused=input_focused;
+                    // SFX_VR_FORCE_RENDER plays unfocused too, with empty controls.
+                    const bool focused=input_focused || diagnostics.force_render;
                     if(startup.reset_requested) {
                       startup.reset_requested=false;
                       if(focused) {
@@ -919,7 +934,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         startup.open_runtime();startup_release=true;
                     }
                     const bool was_menu=startup.open;
-                    startup.sample(controls,focused);
+                    if(autostart_level && startup.open && !startup.runtime) {
+                        // As if START followed the menu's level-select cheat.
+                        startup.selected_level=*autostart_level;startup.open=false;autostart_level.reset();
+                    } else startup.sample(controls,focused);
                     if(recenter_revision!=startup.recenter_revision) {
                         recenter_revision=startup.recenter_revision;
                         renderer.request_recenter();ui_anchor.reset();
@@ -983,6 +1001,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         && !controls.bomb && !controls.boost && !controls.brake)
                         startup_release=false;
                     const bool playing=focused && !startup.open && !startup_release;
+                    diag_frame_in_game=playing;
                     if(!live->output.set_active(playing)) throw std::runtime_error(live->output.status());
                     if(!playing) {
                         input.stop_haptics();
@@ -1692,8 +1711,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             // menu/select/reset press.
             if(host.desktop_controls) static_cast<void>(host.desktop_controls());
             if(host.stop_desktop_rumble) host.stop_desktop_rumble();
-            if(live) static_cast<void>(live->driver->advance(input_time.value_or(0),{},false));
-            if(live && !live->output.set_active(false)) {std::cerr<<live->output.status()<<'\n';return 8;}
+            if(live && !diagnostics.force_render) static_cast<void>(live->driver->advance(input_time.value_or(0),{},false));
+            if(live && !diagnostics.force_render && !live->output.set_active(false)) {std::cerr<<live->output.status()<<'\n';return 8;}
+        }
+        if(session.forced_rejections()!=forced_rejections_logged) {
+            if(!forced_rejections_logged) session_log("[vr] runtime refused forced layers; submitting empty frames: "+session.status());
+            forced_rejections_logged=session.forced_rejections();
         }
         if(result==Result::error) {
             std::cerr<<"Eye rendering failed: "<<commands.status()<<"; "<<session.status()<<"; "<<swapchains.status()<<"; "<<input.status()<<"; "<<game_error<<'\n';return 8;
@@ -1716,6 +1739,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     frame.gpu_ms[eye_index]=eye_frame_profile[eye_index]->gpu_timestamp_ms;
                 }
                 perf_log.add_frame(now_s,frame);
+                perf_window_forced|=renderer.last_frame_forced();
                 if(const auto fallback=refresh_rate.observe(now_s,session.state()==XR_SESSION_STATE_FOCUSED)) {
                     std::ostringstream line;
                     line<<"[vr] display refresh below 90% for two 10 s windows; requesting "<<*fallback<<" Hz: "
@@ -1725,7 +1749,18 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 if(const auto line=perf_log.poll(now_s)) {
                     std::ostringstream rate;
                     if(refresh_rate.current()) rate<<" display="<<*refresh_rate.current()<<"Hz";
+                    if(perf_window_forced) rate<<" forced=1";
+                    perf_window_forced=false;
                     session_log(*line+rate.str());
+                }
+            }
+            if(diagnostics.exit_after_seconds && diag_frame_in_game && !startup.exit_requested) {
+                // SFX_VR_EXIT_AFTER: counted from the first submitted in-game frame.
+                const auto now=std::chrono::steady_clock::now();
+                if(!diag_in_game_since) diag_in_game_since=now;
+                else if(std::chrono::duration<double>(now-*diag_in_game_since).count()>=*diagnostics.exit_after_seconds) {
+                    session_log("[vr] SFX_VR_EXIT_AFTER reached; quitting to Steam");
+                    startup.exit_requested=true;
                 }
             }
             if(profile_csv.enabled()) {

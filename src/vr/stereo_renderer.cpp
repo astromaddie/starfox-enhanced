@@ -15,7 +15,7 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
         if(!session_.running() || session_.exit_requested()) return Result::idle;
         frame_=session_.begin_frame();
         if(!frame_) return Result::error;
-        next_eye_=0;cancelling_=false;display_period_=frame_->display_period;
+        next_eye_=0;cancelling_=false;display_period_=frame_->display_period;forced_=frame_->forced;
         if(frame_->tracking_origin_changed || recenter_pending_) {
             const bool keep_height=recenter_pending_ && !recenter_height_pending_
                 && !frame_->tracking_origin_changed;
@@ -30,6 +30,7 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
         if(anchor_position_) {
             if(!position_anchor_.apply(scene_views,head_translation_)) cancelling_=true;
         }
+        rotate_views_yaw(scene_views,diag_yaw_);
         for(unsigned eye=0;eye<2 && !cancelling_;++eye) {
             const auto camera=eye_camera(scene_views[eye],units,near_plane,far_plane);
             if(!camera) {cancelling_=true;break;}

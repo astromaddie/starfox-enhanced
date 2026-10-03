@@ -29,6 +29,7 @@ struct StereoFrame {
     XrDuration display_period{};
     bool should_render{};
     bool tracking_origin_changed{};
+    bool forced{}; // SFX_VR_FORCE_RENDER drew what the runtime did not ask for.
     std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
 };
 class OpenXrSession {
@@ -49,6 +50,11 @@ public:
     // is marked exiting immediately. Returns false if the runtime refused.
     bool request_exit();
     bool exit_in_progress() const noexcept {return exit_asked_;}
+    // SFX_VR_FORCE_RENDER: render every frame, with synthetic_stereo_views()
+    // whenever the views are not valid; such frames are marked forced. A
+    // runtime that refuses their layers gets an empty frame instead.
+    void set_force_render(bool on) noexcept {force_render_=on;}
+    unsigned forced_rejections() const noexcept {return forced_rejections_;}
     std::optional<StereoFrame> begin_frame();
     // Submit only completed/released swapchain layers. Invisible/untracked
     // frames always submit zero layers, while retaining frame pacing.
@@ -67,6 +73,8 @@ private:
     XrSessionState state_{XR_SESSION_STATE_UNKNOWN};
     XrEnvironmentBlendMode blend_{XR_ENVIRONMENT_BLEND_MODE_OPAQUE};
     bool running_{},exit_{},frame_active_{},renderable_{},exit_asked_{};
+    bool force_render_{},forced_{};
+    unsigned forced_rejections_{};
     XrTime frame_time_{};
     std::vector<XrTime> origin_changes_;
     std::string status_{"OpenXR session not initialized"};

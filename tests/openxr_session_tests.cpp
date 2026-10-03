@@ -1,5 +1,6 @@
 #include "starfox/vr/openxr_session.hpp"
 #include "starfox/vr/stereo_renderer.hpp"
+#include <cmath>
 #include <cstring>
 #include <deque>
 #include <iostream>
@@ -13,7 +14,8 @@ struct Fake {
     std::deque<XrSessionState> events;
     std::deque<XrEventDataReferenceSpaceChangePending> origin_changes;
     std::vector<int> calls;
-    bool render=true,tracked=true,fail_space=false,fail_locate=false,fail_exit=false;
+    bool render=true,tracked=true,fail_space=false,fail_locate=false,fail_exit=false,refuse_layers=false;
+    unsigned end_calls=0;
     uint32_t submitted=99;
     XrTime submitted_time{};
     XrTime predicted_time{123456};
@@ -58,9 +60,9 @@ XrResult XRAPI_PTR wait(XrSession,const XrFrameWaitInfo*,XrFrameState* out) {
 }
 XrResult XRAPI_PTR begin_frame(XrSession,const XrFrameBeginInfo*) {fake.calls.push_back(5);return XR_SUCCESS;}
 XrResult XRAPI_PTR end_frame(XrSession,const XrFrameEndInfo* info) {
-    fake.calls.push_back(7);fake.submitted=info->layerCount;fake.submitted_time=info->displayTime;
+    fake.calls.push_back(7);fake.submitted=info->layerCount;fake.submitted_time=info->displayTime;++fake.end_calls;
     require(info->environmentBlendMode==XR_ENVIRONMENT_BLEND_MODE_OPAQUE,"preferred opaque blend not selected");
-    return XR_SUCCESS;
+    return fake.refuse_layers && info->layerCount?XR_ERROR_LAYER_INVALID:XR_SUCCESS;
 }
 XrResult XRAPI_PTR views(XrSession,const XrViewLocateInfo* info,XrViewState* state,uint32_t capacity,uint32_t* count,XrView* out) {
     require(info->displayTime==fake.predicted_time && info->space==handle<XrSpace>(3) && capacity==2,"view location ignored predicted time/local space");
@@ -102,8 +104,81 @@ XrResult XRAPI_PTR image_wait(XrSwapchain,const XrSwapchainImageWaitInfo*) {
 XrResult XRAPI_PTR release(XrSwapchain,const XrSwapchainImageReleaseInfo*) {
     ++released;return XR_SUCCESS;
 }
+void forced_frames() {
+    fake=Fake{};
+    OpenXrSession s(api());start(s);s.set_force_render(true);
+    XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    const XrCompositionLayerBaseHeader* layers[]{reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer)};
+    // A runtime that wants the frame and tracks the head: unchanged, not forced.
+    auto frame=s.begin_frame();require(frame && frame->should_render && !frame->forced,"forcing changed a normal frame");
+    require(frame->views[0].fov.angleLeft==-.7F,"real views replaced");
+    require(s.end_frame(layers) && fake.submitted==1,"normal frame not submitted");
+    // Standby with valid tracking: real views, submitted, marked forced.
+    fake.render=false;fake.calls.clear();
+    frame=s.begin_frame();require(frame && frame->should_render && frame->forced,"standby frame not forced");
+    require(fake.calls==std::vector<int>({4,5,6}),"standby views not located");
+    require(frame->views[0].fov.angleLeft==-.7F && frame->views[0].pose.position.x==-.032F,"valid standby views replaced");
+    require(s.end_frame(layers) && fake.submitted==1,"forced frame not submitted");
+    // Untracked or failed location: synthetic views, never an exception.
+    const auto synthetic=synthetic_stereo_views();
+    for(const bool fail:{false,true}) {
+        fake.tracked=fail;fake.fail_locate=fail;
+        frame=s.begin_frame();require(frame && frame->should_render && frame->forced,"untracked frame not forced");
+        for(unsigned eye=0;eye<2;++eye)
+            require(std::memcmp(&frame->views[eye].pose,&synthetic[eye].pose,sizeof(XrPosef))==0
+                && frame->views[eye].fov.angleLeft==synthetic[eye].fov.angleLeft,"synthetic views not used");
+        require(s.end_frame(layers) && fake.submitted==1,"synthetic frame not submitted");
+    }
+    fake.render=true;
+    frame=s.begin_frame();require(frame && frame->forced,"wanted frame with failed location not forced");
+    require(s.end_frame(layers) && fake.submitted==1,"wanted synthetic frame not submitted");
+    fake.fail_locate=false;fake.tracked=true;
+    // A refused forced layer falls back to an empty frame and keeps going.
+    fake.render=false;fake.refuse_layers=true;fake.end_calls=0;
+    frame=s.begin_frame();require(frame && frame->forced,"refusal fixture not forced");
+    require(s.end_frame(layers) && fake.end_calls==2 && fake.submitted==0 && s.forced_rejections()==1,
+        "refused forced layers not retried empty");
+    require(s.begin_frame().has_value() && s.end_frame(layers) && s.forced_rejections()==2,"refusal stopped frames");
+    // A real frame's refusal is still an error, and forcing off restores the old skip.
+    fake.render=true;fake.end_calls=0;
+    require(s.begin_frame().has_value() && !s.end_frame(layers) && fake.end_calls==1,"normal refusal retried");
+    fake.refuse_layers=false;fake.render=false;s.set_force_render(false);fake.calls.clear();
+    frame=s.begin_frame();require(frame && !frame->should_render && !frame->forced,"forcing outlived its setting");
+    require(fake.calls==std::vector<int>({4,5}) && s.end_frame(layers) && fake.submitted==0,"unforced standby changed");
+}
+void forced_renderer() {
+    fake=Fake{};fake.render=false;fake.tracked=false;
+    OpenXrSession session(api());start(session);session.set_force_render(true);
+    OpenXrSwapchains chains({formats,swap_create,swap_destroy,images,acquire,image_wait,release});
+    std::array<XrViewConfigurationView,2> config{};
+    for(auto& eye:config) {
+        eye.recommendedImageRectWidth=eye.recommendedImageRectHeight=100;
+        eye.maxImageRectWidth=eye.maxImageRectHeight=100;eye.maxSwapchainSampleCount=1;
+    }
+    const std::array<int64_t,1> preferred{43};
+    require(chains.initialize(session.handle(),config,preferred),"forced swapchains failed");
+    StereoRenderer renderer(session,chains);
+    std::array<EyeCamera,2> cameras{};
+    const auto draw=[&](unsigned eye,uint32_t,const EyeCamera& camera,XrTime) {cameras[eye]=camera;return true;};
+    require(renderer.step(draw,1,.1F)==StereoRenderer::Result::submitted && renderer.last_frame_forced()
+        && fake.submitted==1,"forced standby frame not rendered and submitted");
+    // Synthetic left eye at x=-0.0315 looking down -Z.
+    require(std::abs(cameras[0].view[12]-.0315F)<1e-6F && std::abs(cameras[0].view[14])<1e-6F,"synthetic camera wrong");
+    // DIAG_YAW 180 turns the cameras about the head centre: the left eye
+    // swaps sides and looks down +Z, while the submitted layer keeps its pose.
+    renderer.set_diag_yaw(std::acos(-1.F));
+    require(renderer.step(draw,1,.1F)==StereoRenderer::Result::submitted,"turned frame not submitted");
+    require(std::abs(cameras[0].view[12]-.0315F)<1e-5F && std::abs(cameras[0].view[0]+1)<1e-5F
+        && std::abs(cameras[0].view[10]+1)<1e-5F,"diagnostic yaw not applied to the camera");
+    require(chains.projection() && chains.projection()->views[0].pose.orientation.w==1,"diagnostic yaw moved the layer");
+    session.set_force_render(false);
+    require(renderer.step(draw,1,.1F)==StereoRenderer::Result::skipped && !renderer.last_frame_forced(),"unforced standby rendered");
+}
 }
 int main() try {
+    forced_frames();
+    forced_renderer();acquisitions=released=0;
+    fake=Fake{};
     {
         OpenXrSession s(api());start(s);
         XrEventDataReferenceSpaceChangePending change{XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING};
