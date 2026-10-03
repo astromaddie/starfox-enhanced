@@ -1071,3 +1071,13 @@ Probe (same turn as above, Follow ON): peak world rotation rate drops from
 and linear-acceleration peaks about 11x versus unsmoothed. Tests cover the
 round trip, the rate, settling, cut and pause snapping, the 90° cap, and that
 Follow OFF ignores the ease. Headset-unverified.
+
+### Smoothing delivery (October 3)
+
+Workflow `37090303671` passed for `eafbc1c` (tick smoothing `2af5ea8` plus the
+Follow ease). Its ARM64 package was uploaded over Wi-Fi (192.168.1.31) the same
+way as the canopy-seat delivery. All package files match the artifact by SHA-256
+(`starfox_steamframe` `0cb5c64a…01b2`). The device metadata names a clean
+`eafbc1c`, no AppleDouble files were added, and the game was not running and was
+not launched. Assets, save, `pregame.cfg`, preferences and the Steam argv/settings
+are unchanged. The `656aff4` runtime is kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
