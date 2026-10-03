@@ -957,3 +957,26 @@ window end. This is in addition to the `vrpreferences.json` rate, which is
 unchanged. Without the extension nothing is requested and the log says so.
 Untested on a device: the Steam Frame runtime's offered rates and whether it
 honours the request are not known.
+
+## Complete cockpit hull (October 3)
+
+Wearer report: the nose looked disconnected and seemed to point at the pilot.
+No face was missing. The forebody kept only source geometry ahead of
+z = -0.065 m: an open-backed, three-sided pyramid 2.2–5.2 m ahead of the seat.
+From the seat, its near open base set the outline, and stereo read that as a
+point aimed back at the pilot.
+
+Cockpit view now draws the complete live player (20 triangles) through
+`cockpit_ship_packet`, the same 12x ship/seat rig as the repair flash. The
+nose runs continuously into the fuselage below the window, and the wing
+blades and wings are visible beside the pilot. The seat is unchanged. The
+fuselage ends 0.93 m ahead of the eye, so looking straight back still shows
+mainly the cabin's rear modules; only the wingtips reach behind the seat.
+Showing the tail and wings behind needs a seat further forward, plus a hull
+cut-out where the cabin sits. That is a design change, pending a mockup.
+
+Cartridge tests (Original and EX) check that the hull keeps every source
+triangle and that it extends from the nose to behind the seat and past both
+sides. They also check that sampled hull surfaces stay more than 0.35 m from
+the eye, and that no hull triangle lies between the eye and the mounted
+instrument face. Headset-unverified.

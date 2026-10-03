@@ -15,4 +15,4 @@ range checks reject incompatible material mappings before rendering.
 The editable exports retain the approved base geometry. Runtime presentation
 calibration widens the upper shell by 70% and lowers it by 16 cm, blending to
 the unchanged instrument face. This applies to front and rear coordinates;
-the source-derived nose, repair effect and pilot reference remain fixed.
+the complete source-derived ship hull, repair effect and pilot reference remain fixed.

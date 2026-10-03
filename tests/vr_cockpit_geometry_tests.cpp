@@ -28,15 +28,14 @@ void verify_rig() {
         SceneVertex v{};std::copy(p.begin(),p.end(),v.position);v.color[0]=p[2]/30;v.color[3]=1;
         v.visibility_enabled=v.group_enabled=1;player.geometry.vertices.push_back(v);
     }
-    const auto nose=cockpit_forebody_packet(player);require(nose.geometry.vertices.size()==6);
-    bool cut=false;
-    for(const auto& v:nose.geometry.vertices) {
-        require(v.position[2]<=cockpit_nose_cut_z+.00001F && !v.visibility_enabled && !v.group_enabled);
-        if(std::abs(v.position[2]-cockpit_nose_cut_z)<.00001F) {cut=true;near(v.color[0],.065F*256/30);}
+    const auto hull=cockpit_ship_packet(player);require(hull.geometry.vertices.size()==3);
+    for(size_t i=0;i<3;++i) {
+        const auto& v=hull.geometry.vertices[i];const auto& source=player.geometry.vertices[i];
+        near(v.position[0],source.position[0]/256);near(v.position[1],-source.position[1]/256);
+        near(v.position[2],-source.position[2]/256);near(v.color[0],source.color[0]);
+        require(!v.visibility_enabled && !v.group_enabled);
     }
-    require(cut);near(nose.model[0],12);near(nose.model[13],-.28F);near(nose.model[14],-1.4F);
-    for(auto& v:player.geometry.vertices)v.position[2]=0;
-    require(cockpit_forebody_packet(player).geometry.vertices.empty());
+    near(hull.model[0],12);near(hull.model[13],-.28F);near(hull.model[14],-1.4F);
     std::vector<DrawPacket> hud(1);hud[0].model=overlay_panel_matrix();mount_cockpit_instruments(hud);
     const float anchor[]{76,175,0};const auto mounted=point(hud[0].model,anchor);
     near(mounted[0],-.015F);near(mounted[1],-.852F);near(mounted[2],-1.243F);
@@ -113,6 +112,40 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     require(same_draw_geometry(world.packets,before.packets));
     const auto cabin=cockpit.assemble(world,scene,prefs);require(cabin.size()==3);
     require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==252 && !cabin[2].geometry.vertices.empty());
+    // The complete hull surrounds the cabin: nose ahead, wings beside and behind.
+    const auto player_slot=std::find(before.handles.begin(),before.handles.end(),scene.player);require(player_slot!=before.handles.end());
+    const auto& source_player=before.packets[size_t(player_slot-before.handles.begin())];
+    require(cabin[2].geometry.vertex_view().size()==source_player.geometry.vertex_view().size());
+    std::array<float,3> lowest{1e9F,1e9F,1e9F},highest{-1e9F,-1e9F,-1e9F};
+    std::vector<std::array<std::array<float,3>,3>> hull;
+    for(size_t i=0;i<cabin[2].geometry.vertices.size();i+=3) {
+        auto& triangle=hull.emplace_back();
+        for(unsigned k=0;k<3;++k) {
+            triangle[k]=point(cabin[2].model,cabin[2].geometry.vertices[i+k].position);
+            for(unsigned a=0;a<3;++a) {lowest[a]=std::min(lowest[a],triangle[k][a]);highest[a]=std::max(highest[a],triangle[k][a]);}
+        }
+    }
+    require(lowest[2]<-4.F && highest[2]>.3F && lowest[0]<-1.5F && highest[0]>1.5F);
+    const auto sub=[](auto a,auto b){return std::array<float,3>{a[0]-b[0],a[1]-b[1],a[2]-b[2]};};
+    const auto cross=[](auto a,auto b){return std::array<float,3>{a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};};
+    const auto dot=[](auto a,auto b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
+    // Seated head clearance: sampled triangle surfaces stay outside 0.35 m.
+    for(const auto& t:hull)for(unsigned u=0;u<=20;++u)for(unsigned v=0;u+v<=20;++v) {
+        const float a=u/20.F,b=v/20.F;std::array<float,3> q{};
+        for(unsigned c=0;c<3;++c)q[c]=t[0][c]+(t[1][c]-t[0][c])*a+(t[2][c]-t[0][c])*b;
+        require(dot(q,q)>.35F*.35F);
+    }
+    // The hull never covers the mounted instrument face seen from the seat.
+    for(float x=-.229F;x<=.203F;x+=.012F)for(float y=-.964F;y<=-.744F;y+=.011F) {
+        const std::array<float,3> target{x,y,-1.243F};
+        for(const auto& t:hull) {
+            const auto e1=sub(t[1],t[0]),e2=sub(t[2],t[0]),h=cross(target,e2);const float det=dot(e1,h);
+            if(std::abs(det)<1e-9F)continue;
+            const auto s0=sub(std::array<float,3>{0,0,0},t[0]);const float u=dot(s0,h)/det;
+            const auto q=cross(s0,e1);const float v=dot(target,q)/det,distance=dot(e2,q)/det;
+            require(!(u>=0 && v>=0 && u+v<=1 && distance>0 && distance<1));
+        }
+    }
     for(size_t i=0;i<world.handles.size();++i) {
         if(world.handles[i]==scene.player)require(world.packets[i].geometry.vertex_view().empty() && world.packets[i].model==identity_matrix);
         else require(same_draw_geometry(std::span(&world.packets[i],1),std::span(&before.packets[i],1)) && world.packets[i].model==before.packets[i].model);
@@ -204,7 +237,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
         ++visible;const auto before_effect=game.save_state();
         const auto attached=cockpit.assemble(native,now,prefs);require(game.save_state()==before_effect);
         require(native.packets[index].geometry.vertex_view().empty() && native.packets[index].geometry.line_view().empty());
-        const auto expected=cockpit_player_overlay_packet(source);
+        const auto expected=cockpit_ship_packet(source);
         const auto actual=std::find_if(attached.begin()+2,attached.end(),[&](const auto& packet){
             return same_draw_geometry(std::span(&packet,1),std::span(&expected,1)) && packet.model==expected.model;
         });require(actual!=attached.end());
@@ -233,7 +266,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
             }};
             check_stream(source.geometry.vertex_view(),actual->geometry.vertex_view());
             check_stream(source.geometry.line_view(),actual->geometry.line_view());
-            require(actual->model==cabin[2].model); // Same calibrated 12x ship/seat rig as the live nose.
+            require(actual->model==cabin[2].model); // Same calibrated 12x ship/seat rig as the live hull.
         }
         if(!captured && !evidence.empty()) {
             for(bool follow:{false,true}) {
@@ -249,7 +282,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     std::cout<<(scene.meters.extended?"EX":"Original")<<" seeded native repair flash: "<<visible
         <<" visible and "<<hidden<<" hidden phases, complete source geometry/materials and common ship-rig registration passed\n";
     std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: 122 front + 84 rear + "
-        <<cabin[2].geometry.vertices.size()/3<<" clipped player triangles; source state/other objects/HUD art unchanged\n";
+        <<cabin[2].geometry.vertices.size()/3<<" player hull triangles; source state/other objects/HUD art unchanged\n";
 }
 }
 int main(int argc,char** argv) try {

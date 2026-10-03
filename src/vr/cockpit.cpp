@@ -20,16 +20,6 @@ SceneVertex flat_vertex(std::array<float,3> position,uint32_t rgb,bool srgb,unsi
     }
     vertex.color[3]=1;return vertex;
 }
-SceneVertex between(const SceneVertex& a,const SceneVertex& b,float t) {
-    auto v=a;
-    for(unsigned i=0;i<3;++i)v.position[i]=a.position[i]+(b.position[i]-a.position[i])*t;
-    for(unsigned i=0;i<4;++i) {
-        v.color[i]=a.color[i]+(b.color[i]-a.color[i])*t;
-        v.odd_color[i]=a.odd_color[i]+(b.odd_color[i]-a.odd_color[i])*t;
-    }
-    for(unsigned i=0;i<2;++i)v.uv[i]=a.uv[i]+(b.uv[i]-a.uv[i])*t;
-    return v;
-}
 SceneVertex pilot_vertex(SceneVertex v) {
     v.position[0]/=256.F;v.position[1]/=-256.F;v.position[2]/=-256.F;
     // The cabin is seen from independent head poses, not the cartridge's eye.
@@ -93,39 +83,10 @@ DrawPacket cockpit_front_packet(const assets::Shape& shape,bool srgb,unsigned br
     }
     return out;
 }
-DrawPacket cockpit_forebody_packet(const DrawPacket& source) {
-    DrawPacket out;out.preserve_native_colour=source.preserve_native_colour;out.shading=source.shading;
-    out.geometry.texels=source.geometry.texels;out.geometry.shared_texels=source.geometry.shared_texels;
-    out.model={cockpit_ship_scale,0,0,0,0,cockpit_ship_scale,0,0,0,0,cockpit_ship_scale,0,
-        -cockpit_seat_m[0],-cockpit_seat_m[1],-cockpit_seat_m[2],1};
-    const auto vertices=source.geometry.vertex_view();
-    if(vertices.size()%3)throw std::runtime_error("Invalid cockpit player triangle packet");
-    for(size_t i=0;i<vertices.size();i+=3) {
-        std::array<SceneVertex,4> clipped{};unsigned count=0;
-        for(unsigned j=0;j<3;++j) {
-            const auto a=pilot_vertex(vertices[i+j]),b=pilot_vertex(vertices[i+(j+1)%3]);
-            const bool inside=a.position[2]<=cockpit_nose_cut_z,next=b.position[2]<=cockpit_nose_cut_z;
-            if(inside)clipped[count++]=a;
-            if(inside!=next)clipped[count++]=between(a,b,(cockpit_nose_cut_z-a.position[2])/(b.position[2]-a.position[2]));
-        }
-        for(unsigned j=1;j+1<count;++j)for(unsigned k:{0U,j,j+1})out.geometry.vertices.push_back(clipped[k]);
-    }
-    const auto lines=source.geometry.line_view();
-    for(size_t i=0;i+1<lines.size();i+=2) {
-        auto a=pilot_vertex(lines[i]),b=pilot_vertex(lines[i+1]);
-        const bool inside=a.position[2]<=cockpit_nose_cut_z,next=b.position[2]<=cockpit_nose_cut_z;
-        if(!inside && !next)continue;
-        if(inside!=next) {
-            const auto v=between(a,b,(cockpit_nose_cut_z-a.position[2])/(b.position[2]-a.position[2]));
-            if(inside)b=v;else a=v;
-        }
-        out.geometry.line_vertices.insert(out.geometry.line_vertices.end(),{a,b});
-    }
-    return out;
-}
-DrawPacket cockpit_player_overlay_packet(const DrawPacket& source) {
-    // The native repair/upgrade wireframe already shares the player's source
-    // pose. Keep its complete geometry, colours and blink state in the same rig.
+DrawPacket cockpit_ship_packet(const DrawPacket& source) {
+    // The whole live ship surrounds the cabin: nose ahead, wings and tail
+    // beside and behind the pilot. The native repair/upgrade wireframe shares
+    // the player's source pose, so it uses the same rig with its blink state.
     auto out=source;const auto vertices=source.geometry.vertex_view(),lines=source.geometry.line_view();
     out.geometry.vertices.assign(vertices.begin(),vertices.end());out.geometry.shared_vertices.reset();
     out.geometry.line_vertices.assign(lines.begin(),lines.end());out.geometry.shared_line_vertices.reset();
@@ -157,7 +118,7 @@ std::vector<DrawPacket> CockpitGeometry::assemble(SourceModelPackets& world,cons
         if(std::any_of(world.compute_models.begin(),world.compute_models.end(),
             [&](const auto& model){return model.packet_index==i;}))
             throw std::runtime_error("Cockpit player rig requires source triangle geometry");
-        out.push_back(player?cockpit_forebody_packet(world.packets[i]):cockpit_player_overlay_packet(world.packets[i]));
+        out.push_back(cockpit_ship_packet(world.packets[i]));
         world.packets[i]=DrawPacket{};
     }
     return out;
