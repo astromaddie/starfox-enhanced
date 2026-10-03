@@ -1081,3 +1081,36 @@ way as the canopy-seat delivery. All package files match the artifact by SHA-256
 `eafbc1c`, no AppleDouble files were added, and the game was not running and was
 not launched. Assets, save, `pregame.cfg`, preferences and the Steam argv/settings
 are unchanged. The `656aff4` runtime is kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
+
+## Ending Arwing at 24x with a rear bulkhead (October 3)
+
+Wearer report: no rear of the ship, and the cabin looked open behind the seat.
+The in-flight ship (`MYSHIP_4`, 20 faces) is complete: every LOD points to it,
+and its body ends just behind the canopy. The bigger problem was scale. At 12x
+the Arwing was about 4.7 m long and the cabin was wider than its wingspan, so the
+cabin walls hid the wings. The cartridge holds the cutscene Arwing used in the
+intro and ending (`MY_DEMOS`, 48 faces / 56 triangles, with a canopy and a body
+behind it; `HIPOLYARWING` is 0 and assembles nothing else). The wearer chose 24x.
+
+- `cockpit_ship_scale` is 24 (an Arwing of about 9.4 m); the world scales with it.
+  The seat is (0, 0.95, 0.75) m: in the cutscene ship's canopy, about 0.3 m
+  above its top.
+- In the cockpit rig, `SourceModels` draws `MY_DEMOS` for the player and the repair
+  flash when their live shape is one of `MYSHIP_4/L/R/B`. It keeps the live pose,
+  palette, hit-flash colour table and shading. The chase view keeps the in-flight
+  ship on the GPU source path. The flash's blink shapes are untouched (9 visible /
+  11 hidden phases, as before).
+- `MY_DEMOS` has no damage variants. When the live ship is narrower than
+  `MYSHIP_4` (a lost wing), `cockpit_ship_packet` trims the hull to the live x extent.
+- Three new authored boxes (`rear_bulkhead_lower/upper/rim`, 36 triangles) close
+  the cabin behind the seat at z 0.60–0.68 m, from the floor to about 0.3 m below
+  the eye, flaring with the side walls. The G-diffusers and wings stay visible
+  above and beside them.
+- `subtract_box` leaves polygons that cannot touch a cut-out whole.
+
+Cartridge tests (Original and EX): the cockpit hull is the 56-triangle cutscene
+ship and the chase view stays on the compute path; a `MYSHIP_L` ship trims the
+hull's +X edge to 2.34 m while −X stays past 3 m; head clearance, instrument
+visibility, repair-flash placement and registration still pass, with 120 rear
+triangles. Production CPU views:
+`build/cockpit-mockups/ending-arwing-24x-production-2026-10-03.png`. Headset-unverified.

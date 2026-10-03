@@ -91,6 +91,8 @@ private:
     const assets::RomImage* rom_{};
     uint32_t scaled_font_{},scaled_messages_{},star_colours_{};
     uint16_t intro_laser_shape_{};
+    uint16_t pilot_shape_{}; // MY_DEMOS, drawn for the player in the cockpit rig
+    std::array<uint16_t,4> flight_shapes_{}; // MYSHIP_4/L/R/B, replaced by pilot_shape_
     std::array<uint32_t,4> intro_showcase_strategies_{};
     assets::ShapeDecoder decoder_;
     std::array<uint16_t,3> colours_{};

@@ -200,3 +200,31 @@ Ka 0 0 0
 Ks 0 0 0
 d 1
 illum 1
+
+newmtl panel_rear_bulkhead
+Kd 0.133333 0.196078 0.250980
+Ka 0 0 0
+Ks 0 0 0
+d 1
+illum 1
+
+newmtl edge_rear_bulkhead
+Kd 0.180392 0.258824 0.317647
+Ka 0 0 0
+Ks 0 0 0
+d 1
+illum 1
+
+newmtl panel_rear_rim
+Kd 0.741176 0.803922 0.835294
+Ka 0 0 0
+Ks 0 0 0
+d 1
+illum 1
+
+newmtl edge_rear_rim
+Kd 0.556863 0.603922 0.627451
+Ka 0 0 0
+Ks 0 0 0
+d 1
+illum 1

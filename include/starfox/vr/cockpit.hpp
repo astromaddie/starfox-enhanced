@@ -1,5 +1,6 @@
 #pragma once
 #include "starfox/vr/source_models.hpp"
+#include <unordered_map>
 namespace starfox::vr {
 // Approved C presentation rig. Source geometry stays in the user's bundle.
 Matrix4 cockpit_instrument_mount(bool extended=false) noexcept;
@@ -13,7 +14,8 @@ inline constexpr std::array<CockpitCutout,2> cockpit_hull_cutouts{{
     {{-1.12F,-2.2F,-2.1F},{1.12F,-.28F,.62F}},
     {{-.5F,-.28F,-1.F},{.5F,.6F,.62F}}}};
 // Live player or repair-flash geometry in the 12x ship/seat rig, outside the cut-outs.
-DrawPacket cockpit_ship_packet(const DrawPacket& source);
+// `keep_x` (ship-local metres) trims a lost wing to match a damaged live ship.
+DrawPacket cockpit_ship_packet(const DrawPacket& source,std::optional<std::array<float,2>> keep_x=std::nullopt);
 // Validates the authored front topology before applying approved face materials.
 DrawPacket cockpit_front_packet(const assets::Shape&,bool srgb=false,unsigned brightness=15);
 class CockpitGeometry {
@@ -27,6 +29,10 @@ private:
     assets::ShapeDecoder decoder_;
     const assets::SymbolMap& symbols_;
     uint32_t flash_player_{};
+    std::optional<std::array<int,2>> intact_x_; // MYSHIP_4 x extent, source units
+    std::unordered_map<uint32_t,std::array<int,2>> live_x_;
+    std::optional<std::array<float,2>> damaged_extent(uint32_t live_shape);
+    std::array<int,2> x_extent(uint32_t shape);
     std::optional<assets::Shape> front_;
     std::array<std::optional<std::array<DrawPacket,2>>,32> cabin_;
 };

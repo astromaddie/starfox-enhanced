@@ -142,6 +142,8 @@ SourceModels::SourceModels(const assets::RomImage& rom,const assets::SymbolMap& 
     interpolation_.flash_player=symbol("FLASHPLAYER_STRAT");
     interpolation_.discrete_rotation_shape=static_cast<uint16_t>(symbol("UP_DOOR"));
     intro_laser_shape_=static_cast<uint16_t>(symbol("RELFASTELASER"));
+    pilot_shape_=static_cast<uint16_t>(symbol("MY_DEMOS"));
+    for(unsigned i=0;const char* name:{"MYSHIP_4","MYSHIP_L","MYSHIP_R","MYSHIP_B"}) flight_shapes_[i++]=static_cast<uint16_t>(symbol(name));
     intro_showcase_strategies_={symbol("ZACOINTRO_ISTRAT"),symbol("ZACO2INTRO_ISTRAT"),
         symbol("ZACOINTRO_STRAT"),symbol("ZACO2INTRO_STRAT")};
     if(symbol("M_NANMODE")) interpolation_.crosshair=symbol("TEST_ISTRAT");
@@ -552,10 +554,17 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
         if(scene.colour_table_override && !crosshair) colour=*scene.colour_table_override;
         else if((flags&2U) && !(flags&0x20U)) colour=colours_[(flags&1U)?1:2];
         else if(flags&1U) colour=colours_[0];
+        // The cockpit encloses the detailed cutscene Arwing in place of the
+        // in-flight ship, with the same pose, palette and hit-flash colours.
+        // Only the in-flight ship shapes; the flash's blink uses other shapes.
+        const bool pilot_hull=cpu_pilot_rig && !shadow && pilot_shape_ && (item.handle==scene.player
+            || (interpolation_.flash_player && object.strategy_address==interpolation_.flash_player))
+            && std::find(flight_shapes_.begin(),flight_shapes_.end(),object.shape)!=flight_shapes_.end();
+        const uint32_t shape=pilot_hull?pilot_shape_:object.shape;
         try {
-            const uint64_t base_key=(uint64_t(object.shape)<<32U)|colour;
+            const uint64_t base_key=(uint64_t(shape)<<32U)|colour;
             auto base=shapes_.find(base_key);
-            if(base==shapes_.end()) base=shapes_.emplace(base_key,decoder_.decode(object.shape,{},colour)).first;
+            if(base==shapes_.end()) base=shapes_.emplace(base_key,decoder_.decode(shape,{},colour)).first;
             const auto header=base->second.header;
             const auto selected=shadow?header.shadow_pointer:assets::ShapeDecoder::select_lod_pointer(header,item.source_pose.source_depth);
             const uint64_t lod_key=base_key|(uint64_t(selected)<<16U);
@@ -674,7 +683,7 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 }
             }
             if(!reused && !build_draw_packet(lod->second,pose,palette,112,1,srgb,units,packet,error)) {
-                defer("shape "+std::to_string(object.shape)+" LOD "+std::to_string(selected)+": "+error);continue;
+                defer("shape "+std::to_string(shape)+" LOD "+std::to_string(selected)+": "+error);continue;
             }
             if(!reused && interpolation_.crosshair && object.strategy_address==interpolation_.crosshair) {
                 // Reticle stations belong to the game's camera plane, not

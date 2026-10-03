@@ -18,10 +18,10 @@ std::array<float,3> point(const Matrix4& m,const float* p) {
     for(unsigned r=0;r<3;++r) {result[r]=m[12+r];for(unsigned c=0;c<3;++c)result[r]+=m[c*4+r]*p[c];}
     return result;
 }
-void near(float a,float b) {require(std::abs(a-b)<.001F);}
+void near(float a,float b,const std::source_location& where=std::source_location::current()) {require(std::abs(a-b)<.001F,where);}
 void verify_rig() {
-    auto rear=cockpit_rear_packet();require(rear.geometry.vertices.size()==7*12*3);
-    for(const auto& v:rear.geometry.vertices)require(v.position[1]<-.49F && !v.visibility_enabled && !v.texture[3]);
+    auto rear=cockpit_rear_packet();require(rear.geometry.vertices.size()==10*12*3); // walls, floor, rear bulkhead
+    for(const auto& v:rear.geometry.vertices)require(v.position[1]<-.28F && !v.visibility_enabled && !v.texture[3]); // below the eye: shoulder-height bulkhead
     auto black=cockpit_rear_packet(false,0);for(const auto& v:black.geometry.vertices)require(v.color[0]==0 && v.color[3]==1);
     // Source units; +Z is forward. The first triangle lies wholly on the nose,
     // ahead of the cabin. The second reaches back into the tub and is cut.
@@ -41,10 +41,10 @@ void verify_rig() {
         const auto pilot=point(hull.model,v.position);
         require(pilot[2]<=cockpit_hull_cutouts[0].low[2]+.0001F && !v.visibility_enabled && !v.group_enabled);
         if(std::abs(pilot[2]-cockpit_hull_cutouts[0].low[2])<.0001F) {
-            cut=true;near(v.color[0],(-cockpit_hull_cutouts[0].low[2]/12*256)/100); // colour interpolates along the cut edge
+            cut=true;near(v.color[0],(-(cockpit_hull_cutouts[0].low[2]+cockpit_seat_m[2])/cockpit_ship_scale*256)/100); // colour interpolates along the cut edge
         }
     }
-    require(cut);near(hull.model[0],12);near(hull.model[13],-cockpit_seat_m[1]);near(hull.model[14],-cockpit_seat_m[2]);
+    require(cut);near(hull.model[0],cockpit_ship_scale);near(hull.model[13],-cockpit_seat_m[1]);near(hull.model[14],-cockpit_seat_m[2]);
     for(auto& v:player.geometry.vertices)v.position[2]=10;
     require(cockpit_ship_packet(player).geometry.vertices.empty());
     std::vector<DrawPacket> hud(1);hud[0].model=overlay_panel_matrix();mount_cockpit_instruments(hud);
@@ -122,7 +122,29 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     auto off=prefs;off.cockpit=false;require(cockpit.assemble(world,scene,off).empty());
     require(same_draw_geometry(world.packets,before.packets));
     const auto cabin=cockpit.assemble(world,scene,prefs);require(cabin.size()==3);
-    require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==252 && !cabin[2].geometry.vertices.empty());
+    // The cockpit encloses the 48-face cutscene Arwing (MY_DEMOS, 56 triangles);
+    // the chase view keeps the in-flight ship on the GPU source path.
+    {
+        const auto slot=[&](const SourceModelPackets& packets) {
+            const auto found=std::find(packets.handles.begin(),packets.handles.end(),scene.player);
+            require(found!=packets.handles.end());return size_t(found-packets.handles.begin());
+        };
+        require(std::any_of(defaults.compute_models.begin(),defaults.compute_models.end(),
+            [&](const auto& model){return model.packet_index==slot(defaults);})); // in-flight ship on the GPU source path
+        require(before.packets[slot(before)].geometry.vertex_view().size()==56*3);
+        // A lost wing (MYSHIP_L is narrower on +X) trims the cutscene hull to match.
+        auto damaged=game.restored_state(saved);
+        damaged->objects().at(damaged->player()).shape=uint16_t(symbols.find("MYSHIP_L").at(0));
+        GameSceneHistory damaged_history(*damaged,rom,symbols);const auto& damaged_scene=*damaged_history.current();
+        require(pilot_view_active(damaged_scene,prefs));
+        auto damaged_world=models.assemble_world_interpolated(damaged_scene,damaged_scene,1,false,true,true);
+        const auto damaged_cabin=cockpit.assemble(damaged_world,damaged_scene,prefs);require(damaged_cabin.size()==3);
+        float low=1e9F,high=-1e9F;
+        for(const auto& v:damaged_cabin[2].geometry.vertices) {const auto q=point(damaged_cabin[2].model,v.position);low=std::min(low,q[0]);high=std::max(high,q[0]);}
+        const float edge=25.F/256*cockpit_ship_scale;
+        require(std::abs(high-edge)<.01F && low<-3.F);
+    }
+    require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==360 && !cabin[2].geometry.vertices.empty());
     // The live hull surrounds the canopy seat: nose ahead, wings beside and behind.
     const auto player_slot=std::find(before.handles.begin(),before.handles.end(),scene.player);require(player_slot!=before.handles.end());
     const auto& source_player=before.packets[size_t(player_slot-before.handles.begin())];
@@ -262,8 +284,13 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
                 for(unsigned a=0;a<3;++a)inside&=pilot[a]>box.low[a]+.001F && pilot[a]<box.high[a]-.001F;
                 require(!inside);
             }
+            // Flat faces share corners, so a kept corner matches one of the source faces meeting there.
+            bool at_source=false,matched=false;
             for(const auto& f:from)if(std::abs(f.position[0]/256-v.position[0])<1e-6F && std::abs(-f.position[1]/256-v.position[1])<1e-6F
-                && std::abs(-f.position[2]/256-v.position[2])<1e-6F)for(unsigned c=0;c<4;++c)near(f.color[c],v.color[c]);
+                && std::abs(-f.position[2]/256-v.position[2])<1e-6F) {
+                at_source=true;bool same=true;for(unsigned c=0;c<4;++c)same&=std::abs(f.color[c]-v.color[c])<.001F;matched|=same;
+            }
+            require(!at_source || matched);
         }};
         check_kept(actual->geometry.vertex_view(),source.geometry.vertex_view());
         check_kept(actual->geometry.line_view(),source.geometry.line_view());
@@ -288,7 +315,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
             }};
             check_stream(source.geometry.vertex_view());
             check_stream(source.geometry.line_view());
-            require(actual->model==cabin[2].model); // Same calibrated 12x ship/seat rig as the live hull.
+            require(actual->model==cabin[2].model); // Same calibrated ship/seat rig as the live hull.
         }
         if(!captured && !evidence.empty()) {
             for(bool follow:{false,true}) {
@@ -303,7 +330,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     require(visible>0 && hidden>0);
     std::cout<<(scene.meters.extended?"EX":"Original")<<" seeded native repair flash: "<<visible
         <<" visible and "<<hidden<<" hidden phases, complete source geometry/materials and common ship-rig registration passed\n";
-    std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: 122 front + 84 rear + "
+    std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: 122 front + 120 rear + "
         <<cabin[2].geometry.vertices.size()/3<<" player hull triangles; source state/other objects/HUD art unchanged\n";
 }
 }

@@ -145,6 +145,26 @@
       16,
       24,
       34
+    ],
+    "panel_rear_bulkhead": [
+      34,
+      50,
+      64
+    ],
+    "edge_rear_bulkhead": [
+      46,
+      66,
+      81
+    ],
+    "panel_rear_rim": [
+      189,
+      205,
+      213
+    ],
+    "edge_rear_rim": [
+      142,
+      154,
+      160
     ]
   }
 }

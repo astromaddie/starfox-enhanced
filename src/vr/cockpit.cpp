@@ -57,6 +57,12 @@ bool has_area(const std::vector<SceneVertex>& polygon) {
 // Convex pieces of a convex polygon that lie outside an axis-aligned box.
 std::vector<std::vector<SceneVertex>> subtract_box(std::vector<SceneVertex> inside,const CockpitCutout& box) {
     std::vector<std::vector<SceneVertex>> out;
+    // Leave polygons that cannot touch the box whole.
+    for(unsigned axis=0;axis<3;++axis) {
+        float low=inside[0].position[axis],high=low;
+        for(const auto& v:inside) {low=std::min(low,v.position[axis]);high=std::max(high,v.position[axis]);}
+        if(high<=box.low[axis] || low>=box.high[axis]) {out.push_back(std::move(inside));return out;}
+    }
     for(unsigned axis=0;axis<3;++axis)for(bool high:{false,true}) {
         const float value=high?box.high[axis]:box.low[axis];
         auto outside=clip_axis(inside,axis,value,high);
@@ -141,7 +147,7 @@ DrawPacket cockpit_front_packet(const assets::Shape& shape,bool srgb,unsigned br
     }
     return out;
 }
-DrawPacket cockpit_ship_packet(const DrawPacket& source) {
+DrawPacket cockpit_ship_packet(const DrawPacket& source,std::optional<std::array<float,2>> keep_x) {
     // The whole live ship surrounds the cabin: nose ahead, wings and tail
     // beside and behind the pilot. The native repair/upgrade wireframe shares
     // the player's source pose, so it uses the same rig with its blink state.
@@ -157,6 +163,11 @@ DrawPacket cockpit_ship_packet(const DrawPacket& source) {
             l.low[a]=(box.low[a]+cockpit_seat_m[a])/cockpit_ship_scale;
             l.high[a]=(box.high[a]+cockpit_seat_m[a])/cockpit_ship_scale;
         }
+    }
+    if(keep_x) {
+        constexpr float far=1e6F;
+        local.push_back({{-far,-far,-far},{(*keep_x)[0],far,far}});
+        local.push_back({{(*keep_x)[1],-far,-far},{far,far,far}});
     }
     const auto vertices=source.geometry.vertex_view();
     if(vertices.size()%3)throw std::runtime_error("Invalid cockpit player triangle packet");
@@ -185,6 +196,24 @@ DrawPacket cockpit_ship_packet(const DrawPacket& source) {
 CockpitGeometry::CockpitGeometry(const assets::RomImage& rom,const assets::SymbolMap& symbols)
     :decoder_(rom,symbols),symbols_(symbols) {
     const auto& values=symbols.find("FLASHPLAYER_STRAT");if(!values.empty())flash_player_=values.front();
+    if(const auto& intact=symbols.find("MYSHIP_4");!intact.empty())intact_x_=x_extent(intact.front());
+}
+std::array<int,2> CockpitGeometry::x_extent(uint32_t shape) {
+    auto found=live_x_.find(shape);
+    if(found==live_x_.end()) {
+        std::array<int,2> extent{0,0};
+        for(const auto& v:decoder_.decode(shape).vertices) {extent[0]=std::min(extent[0],int(v.x));extent[1]=std::max(extent[1],int(v.x));}
+        found=live_x_.emplace(shape,extent).first;
+    }
+    return found->second;
+}
+// The cutscene hull has no damage variants. When the live ship has lost a
+// wing (MYSHIP_L/R/B are narrower than MYSHIP_4), trim it to the live extent.
+std::optional<std::array<float,2>> CockpitGeometry::damaged_extent(uint32_t live_shape) {
+    if(!intact_x_) return std::nullopt;
+    const auto e=x_extent(live_shape);
+    if(e==*intact_x_) return std::nullopt;
+    return std::array<float,2>{e[0]>(*intact_x_)[0]?e[0]/256.F:-1e6F,e[1]<(*intact_x_)[1]?e[1]/256.F:1e6F};
 }
 std::vector<DrawPacket> CockpitGeometry::assemble(SourceModelPackets& world,const GameSceneSnapshot& scene,
     const PresentationPreferences& preferences,bool srgb) {
@@ -205,7 +234,8 @@ std::vector<DrawPacket> CockpitGeometry::assemble(SourceModelPackets& world,cons
         if(std::any_of(world.compute_models.begin(),world.compute_models.end(),
             [&](const auto& model){return model.packet_index==i;}))
             throw std::runtime_error("Cockpit player rig requires source triangle geometry");
-        out.push_back(cockpit_ship_packet(world.packets[i]));
+        out.push_back(cockpit_ship_packet(world.packets[i],player && object!=scene.objects.end()
+            ?damaged_extent(object->object.shape):std::nullopt));
         world.packets[i]=DrawPacket{};
     }
     return out;
