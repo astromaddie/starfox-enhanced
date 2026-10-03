@@ -939,6 +939,7 @@ range. An override wins over the saved preference and is never written to
 | `SFX_VR_HAPTICS` | Haptics strength 0..1 (default from the saved setting, 0.6). The menu row shows `NN% ENV` while it is set, and changing it there has no effect |
 | `SFX_VR_TIMING_GPU` | `1`/`true`/`on` enables GPU timestamp queries, which fills `gpu=` in `[vr-perf]`; default off (also on with `--profile-csv`) |
 | `SFX_VR_REFRESH_RATE` | Target display refresh in Hz, default 90 (added with the refresh-rate request) |
+| `SFX_VR_RESOLUTION_SCALE` | Diagnostic: eye buffers at 0.5–1 of the runtime's recommended size (default 1), to measure how GPU time follows pixel count |
 | `SFX_VR_FORCE_RENDER` | `1` renders and submits every frame even when the runtime says not to (headset off, standby) and runs the game while unfocused, with empty controls. Real views when valid, else a synthetic head at the LOCAL origin (63 mm IPD, ±50° x ±48°). Default off. Added October 4 |
 | `SFX_VR_DIAG_YAW` | Degrees (-360..360) to turn the rendered head about +Y, positive to the left, for stereo checks at 0/90/180°. Default 0. Added October 4 |
 | `SFX_VR_AUTOSTART` | A level name such as `LEVEL1_1` (any case): skips the startup menu and starts that level as the level-select cheat would. An unknown name is logged and the menu shows. Not a registry key. Added October 4 |
@@ -1289,3 +1290,23 @@ are exact. Fixed:
 Not changed: the lost-wing trim assumes the live ship's pose scale is 1, as seen
 in the cartridge test; clipped hull vertices interpolate only position, colour
 and UV, which is enough for MY_DEMOS's flat faces.
+
+## First unattended frame-time capture (October 4)
+
+`11ad19b` was installed and run unattended with `SFX_VR_FORCE_RENDER=1`,
+`SFX_VR_AUTOSTART=LEVEL1_1`, `SFX_VR_EXIT_AFTER=120`, `SFX_VR_REFRESH_RATE=90` and
+`SFX_VR_TIMING_GPU=1`, launched through `steam.pipe` while holding the Frame lock.
+The launcher consumed the one-shot file, the level started, every window was
+forced, and the run exited on time. Log: `build/frame-devkit/runs/11ad19b-forced-LEVEL1_1-90hz.log`.
+
+- With the headset in standby the runtime offered only 90 Hz, so 120 Hz cannot
+  be measured unattended.
+- At 90 Hz the app settled at a steady 45 fps (half rate, 0–2 missed frames per
+  window after the first 30 s). CPU per frame was about 2 ms (logic about 1.2).
+  GPU per frame (both eyes summed) was 11.4–16.5 ms against the 11.1 ms budget.
+  Per-eye CPU submit-to-fence was about 11 ms for eye 0 and 7–9 ms for eye 1.
+- To hold 90 Hz, GPU time must drop by roughly 20–30%. Caveat: standby may
+  lower GPU clocks, so worn numbers may be better. A worn [vr-perf] reading is
+  still needed.
+- `SFX_VR_RESOLUTION_SCALE` was added to measure how GPU time follows eye-buffer
+  size (2160x2160 by default, from `preferResolution` in `vrpreferences.json`).

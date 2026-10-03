@@ -542,7 +542,17 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::OpenXrSwapchains swapchains;
     constexpr std::array<int64_t,4> formats{VK_FORMAT_R8G8B8A8_SRGB,VK_FORMAT_B8G8R8A8_SRGB,
         VK_FORMAT_R8G8B8A8_UNORM,VK_FORMAT_B8G8R8A8_UNORM};
-    if(!swapchains.initialize(session.handle(),runtime.views(),formats)) {
+    // SFX_VR_RESOLUTION_SCALE (0.5-1): eye buffers at a fraction of the
+    // runtime's recommended size, to measure how GPU time follows pixel count.
+    auto eye_views=runtime.views();
+    const auto resolution_scale=starfox::vr::env_override_float("resolution_scale");
+    if(resolution_scale && *resolution_scale>=.5F && *resolution_scale<1.F) for(auto& view:eye_views) {
+        view.recommendedImageRectWidth=std::max(64U,uint32_t(std::lround(view.recommendedImageRectWidth**resolution_scale))&~3U);
+        view.recommendedImageRectHeight=std::max(64U,uint32_t(std::lround(view.recommendedImageRectHeight**resolution_scale))&~3U);
+    }
+    std::cout<<"[vr] eye buffers "<<eye_views[0].recommendedImageRectWidth<<'x'<<eye_views[0].recommendedImageRectHeight
+        <<(resolution_scale?" (SFX_VR_RESOLUTION_SCALE)":"")<<'\n';
+    if(!swapchains.initialize(session.handle(),eye_views,formats)) {
         std::cerr<<swapchains.status()<<'\n';return 6;
     }
     std::array<std::vector<VkImage>,2> eye_images;
@@ -558,8 +568,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         }
         for(uint32_t i=0;i<count;++i) if(!images[i].image) {std::cerr<<"Null Vulkan eye image\n";return 6;}
         for(uint32_t i=0;i<count;++i) eye_images[eye_index].push_back(images[i].image);
-        eye_extents[eye_index]={runtime.views()[eye_index].recommendedImageRectWidth,
-            runtime.views()[eye_index].recommendedImageRectHeight};
+        eye_extents[eye_index]={eye_views[eye_index].recommendedImageRectWidth,
+            eye_views[eye_index].recommendedImageRectHeight};
         std::cout<<"Eye "<<eye_index<<": "<<count<<" Vulkan swapchain images, format "<<swapchains.format()<<'\n';
     }
     starfox::vr::VulkanDepthTargets depth;
@@ -803,6 +813,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         if(session_file) session_file<<line<<std::endl;
     };
     if(diagnostics.active()) session_log(diagnostics.describe());
+    if(resolution_scale) session_log("[vr] eye buffers "+std::to_string(eye_extents[0].width)+"x"
+        +std::to_string(eye_extents[0].height)+" (SFX_VR_RESOLUTION_SCALE="+std::to_string(*resolution_scale)+")");
     std::optional<unsigned> autostart_level;
     if(diagnostics.autostart) {
         if(startup.open) autostart_level=startup.level_choice(*diagnostics.autostart,initial_extended);
