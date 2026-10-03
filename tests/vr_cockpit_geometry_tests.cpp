@@ -23,19 +23,30 @@ void verify_rig() {
     auto rear=cockpit_rear_packet();require(rear.geometry.vertices.size()==7*12*3);
     for(const auto& v:rear.geometry.vertices)require(v.position[1]<-.49F && !v.visibility_enabled && !v.texture[3]);
     auto black=cockpit_rear_packet(false,0);for(const auto& v:black.geometry.vertices)require(v.color[0]==0 && v.color[3]==1);
+    // Source units; +Z is forward. The first triangle lies wholly on the nose,
+    // ahead of the cabin. The second reaches back into the tub and is cut.
     DrawPacket player;
-    for(auto p:std::array<std::array<float,3>,3>{{{0,0,30},{10,0,30},{0,10,0}}}) {
-        SceneVertex v{};std::copy(p.begin(),p.end(),v.position);v.color[0]=p[2]/30;v.color[3]=1;
+    for(auto p:std::array<std::array<float,3>,6>{{{0,0,100},{10,0,100},{0,10,100},{0,0,100},{10,0,100},{0,0,10}}}) {
+        SceneVertex v{};std::copy(p.begin(),p.end(),v.position);v.color[0]=p[2]/100;v.color[3]=1;
         v.visibility_enabled=v.group_enabled=1;player.geometry.vertices.push_back(v);
     }
-    const auto hull=cockpit_ship_packet(player);require(hull.geometry.vertices.size()==3);
+    const auto hull=cockpit_ship_packet(player);require(hull.geometry.vertices.size()==9);
     for(size_t i=0;i<3;++i) {
         const auto& v=hull.geometry.vertices[i];const auto& source=player.geometry.vertices[i];
         near(v.position[0],source.position[0]/256);near(v.position[1],-source.position[1]/256);
         near(v.position[2],-source.position[2]/256);near(v.color[0],source.color[0]);
-        require(!v.visibility_enabled && !v.group_enabled);
     }
-    near(hull.model[0],12);near(hull.model[13],-.28F);near(hull.model[14],-1.4F);
+    bool cut=false;
+    for(const auto& v:hull.geometry.vertices) {
+        const auto pilot=point(hull.model,v.position);
+        require(pilot[2]<=cockpit_hull_cutouts[0].low[2]+.0001F && !v.visibility_enabled && !v.group_enabled);
+        if(std::abs(pilot[2]-cockpit_hull_cutouts[0].low[2])<.0001F) {
+            cut=true;near(v.color[0],(-cockpit_hull_cutouts[0].low[2]/12*256)/100); // colour interpolates along the cut edge
+        }
+    }
+    require(cut);near(hull.model[0],12);near(hull.model[13],-cockpit_seat_m[1]);near(hull.model[14],-cockpit_seat_m[2]);
+    for(auto& v:player.geometry.vertices)v.position[2]=10;
+    require(cockpit_ship_packet(player).geometry.vertices.empty());
     std::vector<DrawPacket> hud(1);hud[0].model=overlay_panel_matrix();mount_cockpit_instruments(hud);
     const float anchor[]{76,175,0};const auto mounted=point(hud[0].model,anchor);
     near(mounted[0],-.015F);near(mounted[1],-.852F);near(mounted[2],-1.243F);
@@ -112,10 +123,11 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     require(same_draw_geometry(world.packets,before.packets));
     const auto cabin=cockpit.assemble(world,scene,prefs);require(cabin.size()==3);
     require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==252 && !cabin[2].geometry.vertices.empty());
-    // The complete hull surrounds the cabin: nose ahead, wings beside and behind.
+    // The live hull surrounds the canopy seat: nose ahead, wings beside and behind.
     const auto player_slot=std::find(before.handles.begin(),before.handles.end(),scene.player);require(player_slot!=before.handles.end());
     const auto& source_player=before.packets[size_t(player_slot-before.handles.begin())];
-    require(cabin[2].geometry.vertex_view().size()==source_player.geometry.vertex_view().size());
+    {const auto expected_hull=cockpit_ship_packet(source_player);
+        require(same_draw_geometry(std::span(&cabin[2],1),std::span(&expected_hull,1)) && cabin[2].model==expected_hull.model);}
     std::array<float,3> lowest{1e9F,1e9F,1e9F},highest{-1e9F,-1e9F,-1e9F};
     std::vector<std::array<std::array<float,3>,3>> hull;
     for(size_t i=0;i<cabin[2].geometry.vertices.size();i+=3) {
@@ -125,7 +137,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
             for(unsigned a=0;a<3;++a) {lowest[a]=std::min(lowest[a],triangle[k][a]);highest[a]=std::max(highest[a],triangle[k][a]);}
         }
     }
-    require(lowest[2]<-4.F && highest[2]>.3F && lowest[0]<-1.5F && highest[0]>1.5F);
+    require(lowest[2]<-3.5F && highest[2]>1.5F && lowest[0]<-1.5F && highest[0]>1.5F);
     const auto sub=[](auto a,auto b){return std::array<float,3>{a[0]-b[0],a[1]-b[1],a[2]-b[2]};};
     const auto cross=[](auto a,auto b){return std::array<float,3>{a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};};
     const auto dot=[](auto a,auto b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
@@ -241,31 +253,41 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
         const auto actual=std::find_if(attached.begin()+2,attached.end(),[&](const auto& packet){
             return same_draw_geometry(std::span(&packet,1),std::span(&expected,1)) && packet.model==expected.model;
         });require(actual!=attached.end());
-        require(actual->geometry.vertex_view().size()==source.geometry.vertex_view().size()
-            && actual->geometry.line_view().size()==source.geometry.line_view().size());
+        require(!actual->geometry.vertex_view().empty() || !actual->geometry.line_view().empty());
+        // Kept geometry lies outside the cabin cut-outs; uncut vertices keep their source colours.
+        const auto check_kept=[&](auto shown,auto from) {for(const auto& v:shown) {
+            const auto pilot=point(actual->model,v.position);
+            for(const auto& box:cockpit_hull_cutouts) {
+                bool inside=true;
+                for(unsigned a=0;a<3;++a)inside&=pilot[a]>box.low[a]+.001F && pilot[a]<box.high[a]-.001F;
+                require(!inside);
+            }
+            for(const auto& f:from)if(std::abs(f.position[0]/256-v.position[0])<1e-6F && std::abs(-f.position[1]/256-v.position[1])<1e-6F
+                && std::abs(-f.position[2]/256-v.position[2])<1e-6F)for(unsigned c=0;c<4;++c)near(f.color[c],v.color[c]);
+        }};
+        check_kept(actual->geometry.vertex_view(),source.geometry.vertex_view());
+        check_kept(actual->geometry.line_view(),source.geometry.line_view());
         for(bool follow:{false,true})for(unsigned scale:{0U,5U}) {
             auto calibrated=prefs;calibrated.follow_ship_rotation=follow;calibrated.world_scale=scale;
             calibrated.origin_x=16;calibrated.origin_y=4;calibrated.origin_z=-10;
             const auto rig=presentation_instrument_matrix(*history.previous(),now,.5,calibrated);
             const auto camera=multiply_matrix(rig,actual->model);
             const auto native_camera=multiply_matrix(presentation_scene_matrix(*history.previous(),now,.5,calibrated),source.model);
-            const auto check_stream=[&](auto from,auto to) {for(size_t i=0;i<from.size();++i) {
+            const auto check_stream=[&](auto from) {for(size_t i=0;i<from.size();++i) {
                 const float pilot[]{from[i].position[0]/256,-from[i].position[1]/256,-from[i].position[2]/256};
-                const auto registered=point(camera,pilot),displayed=point(multiply_matrix(rig,expected.model),to[i].position);
+                const auto registered=point(camera,pilot);
                 const float world=cockpit_world_scale(calibrated);
                 const float unscaled[]{pilot[0]*world-cockpit_seat_m[0],
                     pilot[1]*world-cockpit_seat_m[1],pilot[2]*world-cockpit_seat_m[2]};
                 const auto authored=point(native_camera,from[i].position),attached_reference=point(rig,unscaled);
                 for(unsigned axis=0;axis<3;++axis) {
-                    near(registered[axis],displayed[axis]);
                     require(std::abs(authored[axis]-attached_reference[axis])<.005F);
                     // At default world scale the native ship lands exactly on the cabin's ship.
                     if(scale==0)require(std::abs(authored[axis]-registered[axis])<.005F);
                 }
-                for(unsigned c=0;c<4;++c)near(from[i].color[c],to[i].color[c]);
             }};
-            check_stream(source.geometry.vertex_view(),actual->geometry.vertex_view());
-            check_stream(source.geometry.line_view(),actual->geometry.line_view());
+            check_stream(source.geometry.vertex_view());
+            check_stream(source.geometry.line_view());
             require(actual->model==cabin[2].model); // Same calibrated 12x ship/seat rig as the live hull.
         }
         if(!captured && !evidence.empty()) {

@@ -2,6 +2,7 @@
 #include <cmath>
 #include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
+#include <vector>
 #include "cockpit_assets.inc"
 namespace starfox::vr {
 namespace {
@@ -19,6 +20,63 @@ SceneVertex flat_vertex(std::array<float,3> position,uint32_t rgb,bool srgb,unsi
         vertex.color[c]=value;
     }
     vertex.color[3]=1;return vertex;
+}
+SceneVertex between(const SceneVertex& a,const SceneVertex& b,float t) {
+    auto v=a;
+    for(unsigned i=0;i<3;++i)v.position[i]=a.position[i]+(b.position[i]-a.position[i])*t;
+    for(unsigned i=0;i<4;++i) {
+        v.color[i]=a.color[i]+(b.color[i]-a.color[i])*t;
+        v.odd_color[i]=a.odd_color[i]+(b.odd_color[i]-a.odd_color[i])*t;
+    }
+    for(unsigned i=0;i<2;++i)v.uv[i]=a.uv[i]+(b.uv[i]-a.uv[i])*t;
+    return v;
+}
+// Keeps the part of a convex polygon on one side of an axis plane.
+std::vector<SceneVertex> clip_axis(const std::vector<SceneVertex>& polygon,unsigned axis,float value,bool keep_above) {
+    std::vector<SceneVertex> out;
+    for(size_t i=0;i<polygon.size();++i) {
+        const auto& a=polygon[i];const auto& b=polygon[(i+1)%polygon.size()];
+        const bool in_a=keep_above?a.position[axis]>=value:a.position[axis]<=value;
+        const bool in_b=keep_above?b.position[axis]>=value:b.position[axis]<=value;
+        if(in_a)out.push_back(a);
+        if(in_a!=in_b)out.push_back(between(a,b,(value-a.position[axis])/(b.position[axis]-a.position[axis])));
+    }
+    return out;
+}
+// Pieces lying on a cut plane have no area and would only add slivers.
+bool has_area(const std::vector<SceneVertex>& polygon) {
+    if(polygon.size()<3)return false;
+    float normal[3]{};
+    for(size_t i=1;i+1<polygon.size();++i) {
+        const auto* a=polygon[0].position;const auto* b=polygon[i].position;const auto* c=polygon[i+1].position;
+        const float u[]{b[0]-a[0],b[1]-a[1],b[2]-a[2]},v[]{c[0]-a[0],c[1]-a[1],c[2]-a[2]};
+        normal[0]+=u[1]*v[2]-u[2]*v[1];normal[1]+=u[2]*v[0]-u[0]*v[2];normal[2]+=u[0]*v[1]-u[1]*v[0];
+    }
+    return normal[0]*normal[0]+normal[1]*normal[1]+normal[2]*normal[2]>1e-14F;
+}
+// Convex pieces of a convex polygon that lie outside an axis-aligned box.
+std::vector<std::vector<SceneVertex>> subtract_box(std::vector<SceneVertex> inside,const CockpitCutout& box) {
+    std::vector<std::vector<SceneVertex>> out;
+    for(unsigned axis=0;axis<3;++axis)for(bool high:{false,true}) {
+        const float value=high?box.high[axis]:box.low[axis];
+        auto outside=clip_axis(inside,axis,value,high);
+        if(has_area(outside))out.push_back(std::move(outside));
+        inside=clip_axis(inside,axis,value,!high);
+        if(inside.size()<3)return out;
+    }
+    return out;
+}
+void subtract_box(const std::array<SceneVertex,2>& segment,const CockpitCutout& box,std::vector<std::array<SceneVertex,2>>& out) {
+    float enter=0,leave=1;
+    for(unsigned axis=0;axis<3;++axis) {
+        const float a=segment[0].position[axis],d=segment[1].position[axis]-a;
+        if(d==0) {if(a<box.low[axis] || a>box.high[axis]) {out.push_back(segment);return;}continue;}
+        float t0=(box.low[axis]-a)/d,t1=(box.high[axis]-a)/d;if(t0>t1)std::swap(t0,t1);
+        enter=std::max(enter,t0);leave=std::min(leave,t1);
+    }
+    if(enter>=leave) {out.push_back(segment);return;}
+    if(enter>0)out.push_back({segment[0],between(segment[0],segment[1],enter)});
+    if(leave<1)out.push_back({between(segment[0],segment[1],leave),segment[1]});
 }
 SceneVertex pilot_vertex(SceneVertex v) {
     v.position[0]/=256.F;v.position[1]/=-256.F;v.position[2]/=-256.F;
@@ -87,12 +145,41 @@ DrawPacket cockpit_ship_packet(const DrawPacket& source) {
     // The whole live ship surrounds the cabin: nose ahead, wings and tail
     // beside and behind the pilot. The native repair/upgrade wireframe shares
     // the player's source pose, so it uses the same rig with its blink state.
-    auto out=source;const auto vertices=source.geometry.vertex_view(),lines=source.geometry.line_view();
-    out.geometry.vertices.assign(vertices.begin(),vertices.end());out.geometry.shared_vertices.reset();
-    out.geometry.line_vertices.assign(lines.begin(),lines.end());out.geometry.shared_line_vertices.reset();
-    for(auto* stream:{&out.geometry.vertices,&out.geometry.line_vertices})for(auto& v:*stream)v=pilot_vertex(v);
+    // Hull inside the cabin cut-outs is removed; the cabin replaces it there.
+    DrawPacket out;out.preserve_native_colour=source.preserve_native_colour;out.shading=source.shading;
+    out.geometry.texels=source.geometry.texels;out.geometry.shared_texels=source.geometry.shared_texels;
     out.model={cockpit_ship_scale,0,0,0,0,cockpit_ship_scale,0,0,0,0,cockpit_ship_scale,0,
         -cockpit_seat_m[0],-cockpit_seat_m[1],-cockpit_seat_m[2],1};
+    std::vector<CockpitCutout> local;
+    for(const auto& box:cockpit_hull_cutouts) {
+        auto& l=local.emplace_back();
+        for(unsigned a=0;a<3;++a) {
+            l.low[a]=(box.low[a]+cockpit_seat_m[a])/cockpit_ship_scale;
+            l.high[a]=(box.high[a]+cockpit_seat_m[a])/cockpit_ship_scale;
+        }
+    }
+    const auto vertices=source.geometry.vertex_view();
+    if(vertices.size()%3)throw std::runtime_error("Invalid cockpit player triangle packet");
+    for(size_t i=0;i<vertices.size();i+=3) {
+        std::vector<std::vector<SceneVertex>> pieces{{pilot_vertex(vertices[i]),pilot_vertex(vertices[i+1]),pilot_vertex(vertices[i+2])}};
+        for(const auto& box:local) {
+            std::vector<std::vector<SceneVertex>> kept;
+            for(auto& piece:pieces)for(auto& outside:subtract_box(std::move(piece),box))kept.push_back(std::move(outside));
+            pieces=std::move(kept);
+        }
+        for(const auto& polygon:pieces)for(size_t j=1;j+1<polygon.size();++j)
+            for(size_t k:{size_t{0},j,j+1})out.geometry.vertices.push_back(polygon[k]);
+    }
+    const auto lines=source.geometry.line_view();
+    for(size_t i=0;i+1<lines.size();i+=2) {
+        std::vector<std::array<SceneVertex,2>> segments{{pilot_vertex(lines[i]),pilot_vertex(lines[i+1])}};
+        for(const auto& box:local) {
+            std::vector<std::array<SceneVertex,2>> kept;
+            for(const auto& segment:segments)subtract_box(segment,box,kept);
+            segments=std::move(kept);
+        }
+        for(const auto& segment:segments)out.geometry.line_vertices.insert(out.geometry.line_vertices.end(),{segment[0],segment[1]});
+    }
     return out;
 }
 CockpitGeometry::CockpitGeometry(const assets::RomImage& rom,const assets::SymbolMap& symbols)

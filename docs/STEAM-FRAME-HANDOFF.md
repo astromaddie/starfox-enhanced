@@ -980,3 +980,30 @@ triangle and that it extends from the nose to behind the seat and past both
 sides. They also check that sampled hull surfaces stay more than 0.35 m from
 the eye, and that no hull triangle lies between the eye and the mounted
 instrument face. Headset-unverified.
+
+## Canopy seat (October 3)
+
+The wearer chose the canopy-seat mockup
+(`build/cockpit-mockups/seat-options-2026-10-03.png`, bottom row) over the
+original seat. The seat moves 1.4 m forward to sit over the ship origin, so
+the wing blades sweep overhead and the wingtips are visible behind.
+`cockpit_seat_m` is now (0, 0.48, 0). That is 0.2 m higher than the mockup:
+at the mockup height the eye sat on the canopy peak and saw the nose ridge
+end-on, which reproduced the "pointing at me" outline. From 0.2 m above, the
+nose rises from behind the window frame and is seen from above.
+
+`cockpit_ship_packet` removes hull inside two pilot-space cut-outs
+(`cockpit_hull_cutouts`): the cabin tub (|x| ≤ 1.12, y ≤ -0.28, z from -2.1 to
+0.62) and the canopy around the head (|x| ≤ 0.5, y ≥ -0.28, z from -1.0 to
+0.62). Triangles are clipped with interpolated attributes, zero-area pieces
+on shared cut planes are dropped, and lines are trimmed. The repair flash
+uses the same cut. The world camera follows the seat through
+`presentation_scene_matrix`.
+
+Cartridge tests (Original and EX) check that the live hull matches
+`cockpit_ship_packet`, spans from more than 3.5 m ahead to more than 1.5 m
+behind and past both sides, keeps 0.35 m head clearance, and never covers the
+instrument face. They also check that the native ship still registers with
+the rig and that the repair flash lies outside the cut-outs with source
+colours. Production-packet CPU views:
+`build/cockpit-mockups/canopy-seat-production-2026-10-03.png`. Headset-unverified.
