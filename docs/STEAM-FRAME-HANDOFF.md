@@ -1007,3 +1007,15 @@ instrument face. They also check that the native ship still registers with
 the rig and that the repair flash lies outside the cut-outs with source
 colours. Production-packet CPU views:
 `build/cockpit-mockups/canopy-seat-production-2026-10-03.png`. Headset-unverified.
+
+### Canopy seat delivery (October 3)
+
+Workflow `37085349660` passed for `656aff4`. Its `StarFoxEnhanced-steam-frame-arm64`
+artifact was uploaded over Wi-Fi (192.168.1.31; the USB link was down; the host key
+matched the recorded Frame key) with rsync, without deletion and excluding AppleDouble
+files. All package files match the artifact by SHA-256 (`starfox_steamframe`
+`e722b9fa…2937`). The device's `BUILD-METADATA.json` names a clean `656aff4`.
+The game was not running, and no launch was performed. The cartridge assets and
+`starfox-ex.srm` are unchanged, along with `pregame.cfg`,
+`~/.local/share/StarFoxEnhanced`, and the Steam argv/settings JSON. The previous `e86cc07`
+runtime, metadata, launcher and vrpreferences are kept in `~/devkit-game/_StarFoxEnhanced_prev/`.
