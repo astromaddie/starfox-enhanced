@@ -11,6 +11,7 @@
 #include <deque>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <vector>
 using namespace starfox::vr;
@@ -100,6 +101,52 @@ void verify_cockpit_smoothing() {
         require(presentation_scene_matrix(t0,t1,t2,.4,off)==presentation_scene_matrix(t1,t2,.4,off)
             && presentation_instrument_matrix(t0,t1,t2,.4,off)==identity_matrix,"Smoothing changed a non-cockpit view");
     }
+}
+void verify_follow_ease() {
+    using namespace starfox;
+    const auto rotation=[](double yaw,double roll) {
+        const double cy=std::cos(yaw),sy=std::sin(yaw),cr=std::cos(roll),sr=std::sin(roll);
+        const double m[9]{cy*cr,sr,-sy*cr, -cy*sr,cr,sy*sr, sy,0,cy};
+        simulation::MatrixQ15 out{};for(unsigned i=0;i<9;++i)out[i]=int16_t(std::lround(m[i]*32767));
+        return out;
+    };
+    const auto roll_of=[](const simulation::MatrixQ15& m) {return std::atan2(double(m[1]),double(m[0]));};
+    const auto same=[](const simulation::MatrixQ15& a,const simulation::MatrixQ15& b) {
+        for(unsigned i=0;i<9;++i) if(std::abs(int(a[i])-int(b[i]))>3) return false;
+        return true;
+    };
+    CockpitFollowEase ease;
+    const auto start=rotation(.4,.3);
+    require(same(ease.update(start,true,10),start),"Follow ease did not start at the source attitude");
+    require(same(ease.update(start,true,10+1/90.),start),"Follow ease drifted from a still attitude");
+    // A 40 degree bank eases in: one frame moves by 1-exp(-dt/tau), and it settles within about 0.5 s.
+    const double bank=40*std::numbers::pi/180;
+    const auto banked=rotation(0,bank);ease.reset();(void)ease.update(rotation(0,0),true,0);
+    const double first=roll_of(ease.update(banked,true,1/90.));
+    require(std::abs(first-bank*(1-std::exp(-1/90./CockpitFollowEase::time_constant_seconds)))<.002,"Follow ease rate wrong");
+    double t=1/90.;simulation::MatrixQ15 shown{};
+    for(;t<.6;t+=1/90.) shown=ease.update(banked,true,t);
+    require(std::abs(roll_of(shown)-bank)<.01,"Follow ease did not settle");
+    // A cut or a long gap snaps; a large jump never trails by more than 90 degrees.
+    require(same(ease.update(rotation(0,-bank),false,t+=1/90.),rotation(0,-bank)),"Follow ease crossed a cut");
+    require(same(ease.update(rotation(0,bank),true,t+1),rotation(0,bank)),"Follow ease resumed after a pause");
+    ease.reset();(void)ease.update(rotation(0,0),true,0);
+    const double far=170*std::numbers::pi/180;
+    require(std::abs(roll_of(ease.update(rotation(0,far),true,1/90.)))>(far-std::numbers::pi/2)-.01,"Follow ease trailed by more than 90 degrees");
+    // Passing the source attitude reproduces the unfollowed-ease scene; Follow OFF ignores it.
+    GameSceneSnapshot a,b,c;
+    for(auto* s:{&a,&b,&c}) {
+        s->flow=simulation::GameFlowState::gameplay;s->pilot_tracking=true;s->player=7;s->view_matrix=rotation(.1,0);
+        render::ObjectPresentationSnapshot pilot;pilot.generation=2;pilot.strategy_address=1;s->pilot_reference=pilot;
+    }
+    a.pilot_reference->rotation_matrix=rotation(0,.1);b.pilot_reference->rotation_matrix=rotation(0,.3);c.pilot_reference->rotation_matrix=rotation(0,.6);
+    PresentationPreferences prefs;prefs.cockpit=prefs.follow_ship_rotation=true;
+    const auto attitude=cockpit_follow_attitude(a,b,c,.4,prefs);require(attitude && attitude->continuous,"Follow attitude missing");
+    close_matrix(presentation_scene_matrix(a,b,c,.4,prefs,&attitude->rotation),presentation_scene_matrix(a,b,c,.4,prefs));
+    require(presentation_scene_matrix(a,b,c,.4,prefs,&start)!=presentation_scene_matrix(a,b,c,.4,prefs),"Follow attitude ignored");
+    auto off=prefs;off.follow_ship_rotation=false;
+    require(!cockpit_follow_attitude(a,b,c,.4,off),"Follow attitude outside Follow ship rotation");
+    require(presentation_scene_matrix(a,b,c,.4,off,&start)==presentation_scene_matrix(a,b,c,.4,off),"Follow attitude changed Follow OFF");
 }
 template<typename T> T handle(uintptr_t n) {return reinterpret_cast<T>(n);}
 struct Fake {
@@ -434,6 +481,7 @@ int main() try {
     require(quad.cancel()==ImageWait::waiting,"Quad cancellation released unwaited image");
     image_pending=false;require(quad.cancel()==ImageWait::ready && !quad.layer(session.space(),{}),"Cancelled quad submitted");
     verify_cockpit_smoothing();
+    verify_follow_ease();
     std::cout<<"Presentation camera, source HUD grouping and fenced projection+quad tests passed (no headset).\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

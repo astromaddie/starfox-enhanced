@@ -1,6 +1,7 @@
 #include "starfox/vr/scene_interpolation.hpp"
 #include "starfox/vr/background_tiles.hpp"
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 namespace starfox::vr {
 namespace {
@@ -95,7 +96,8 @@ Matrix4 instrument_matrix(const PilotPose& pose,const PresentationPreferences& p
     if(preferences.follow_ship_rotation) out=multiply_matrix(inverse_pilot_rotation(out),out);
     return out;
 }
-Matrix4 scene_matrix(const PilotPose& pose,const PresentationPreferences& preferences) {
+Matrix4 scene_matrix(const PilotPose& pose,const PresentationPreferences& preferences,
+    const simulation::MatrixQ15* follow_attitude=nullptr) {
     auto out=identity_matrix;
     const float scale=cockpit_world_scale(preferences);out[0]=out[5]=out[10]=scale;
     // Calibration is in physical centimetres even when source world scale changes.
@@ -115,7 +117,8 @@ Matrix4 scene_matrix(const PilotPose& pose,const PresentationPreferences& prefer
         auto fixed=preferences;fixed.follow_ship_rotation=false;
         // Translate to the calibrated pilot first, then rotate the whole source
         // scene into the ship frame. Tracking is composed later by application.
-        out=multiply_matrix(inverse_pilot_rotation(instrument_matrix(pose,fixed)),out);
+        auto attitude=pose;if(follow_attitude) attitude.rotation=*follow_attitude;
+        out=multiply_matrix(inverse_pilot_rotation(instrument_matrix(attitude,fixed)),out);
     }
     return out;
 }
@@ -145,7 +148,8 @@ Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& older,const Game
     return instrument_matrix(smoothed_pilot_pose(older,previous,current,alpha),preferences);
 }
 Matrix4 presentation_scene_matrix(const GameSceneSnapshot& older,const GameSceneSnapshot& previous,
-    const GameSceneSnapshot& current,double alpha,const PresentationPreferences& preferences) {
+    const GameSceneSnapshot& current,double alpha,const PresentationPreferences& preferences,
+    const simulation::MatrixQ15* follow_attitude) {
     if(!pilot_view_active(current,preferences)) return presentation_scene_matrix(previous,current,alpha,preferences);
     const auto pose=smoothed_pilot_pose(older,previous,current,alpha);
     // Content stays on the linear source camera (interpolate_scene_poses uses
@@ -161,7 +165,70 @@ Matrix4 presentation_scene_matrix(const GameSceneSnapshot& older,const GameScene
         double component{};for(unsigned c=0;c<3;++c) component+=smoothed[c*4+r]*offset[c];
         correction[12+r]=float(component/256.);
     }
-    return multiply_matrix(scene_matrix(pose,preferences),correction);
+    return multiply_matrix(scene_matrix(pose,preferences,follow_attitude),correction);
+}
+std::optional<CockpitAttitude> cockpit_follow_attitude(const GameSceneSnapshot& older,
+    const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha,const PresentationPreferences& preferences) {
+    if(!preferences.follow_ship_rotation || !pilot_view_active(current,preferences)) return std::nullopt;
+    return CockpitAttitude{smoothed_pilot_pose(older,previous,current,alpha).rotation,pilot_continuous(previous,current)};
+}
+namespace {
+using Quaternion=std::array<double,4>; // w, x, y, z
+Quaternion to_quaternion(const simulation::MatrixQ15& q15) noexcept {
+    double m[3][3];for(unsigned c=0;c<3;++c)for(unsigned r=0;r<3;++r)m[r][c]=q15[c*3+r]/32768.;
+    Quaternion q{};const double trace=m[0][0]+m[1][1]+m[2][2];
+    if(trace>0) {const double s=std::sqrt(trace+1)*2;q={s/4,(m[2][1]-m[1][2])/s,(m[0][2]-m[2][0])/s,(m[1][0]-m[0][1])/s};}
+    else if(m[0][0]>m[1][1] && m[0][0]>m[2][2]) {const double s=std::sqrt(1+m[0][0]-m[1][1]-m[2][2])*2;
+        q={(m[2][1]-m[1][2])/s,s/4,(m[0][1]+m[1][0])/s,(m[0][2]+m[2][0])/s};}
+    else if(m[1][1]>m[2][2]) {const double s=std::sqrt(1+m[1][1]-m[0][0]-m[2][2])*2;
+        q={(m[0][2]-m[2][0])/s,(m[0][1]+m[1][0])/s,s/4,(m[1][2]+m[2][1])/s};}
+    else {const double s=std::sqrt(1+m[2][2]-m[0][0]-m[1][1])*2;
+        q={(m[1][0]-m[0][1])/s,(m[0][2]+m[2][0])/s,(m[1][2]+m[2][1])/s,s/4};}
+    const double n=std::sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+    for(auto& v:q) v/=n;
+    return q;
+}
+simulation::MatrixQ15 to_matrix(const Quaternion& q) noexcept {
+    const double w=q[0],x=q[1],y=q[2],z=q[3];
+    const double m[3][3]{{1-2*(y*y+z*z),2*(x*y-w*z),2*(x*z+w*y)},
+        {2*(x*y+w*z),1-2*(x*x+z*z),2*(y*z-w*x)},{2*(x*z-w*y),2*(y*z+w*x),1-2*(x*x+y*y)}};
+    simulation::MatrixQ15 out{};
+    for(unsigned c=0;c<3;++c)for(unsigned r=0;r<3;++r)
+        out[c*3+r]=int16_t(std::clamp(std::lround(m[r][c]*32768.),-32768L,32767L));
+    return out;
+}
+// Shortest-arc angle between two attitudes, in radians.
+double arc(Quaternion a,const Quaternion& b) noexcept {
+    const double d=std::abs(a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3]);
+    return 2*std::acos(std::min(1.,d));
+}
+Quaternion slerp(Quaternion a,const Quaternion& b,double t) noexcept {
+    double d=a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3];
+    if(d<0) {for(auto& v:a) v=-v;d=-d;}
+    Quaternion out{};
+    if(d>.9995) {for(unsigned i=0;i<4;++i) out[i]=a[i]+(b[i]-a[i])*t;}
+    else {
+        const double theta=std::acos(d),sa=std::sin((1-t)*theta)/std::sin(theta),sb=std::sin(t*theta)/std::sin(theta);
+        for(unsigned i=0;i<4;++i) out[i]=a[i]*sa+b[i]*sb;
+    }
+    const double n=std::sqrt(out[0]*out[0]+out[1]*out[1]+out[2]*out[2]+out[3]*out[3]);
+    for(auto& v:out) v/=n;
+    return out;
+}
+}
+simulation::MatrixQ15 CockpitFollowEase::update(const simulation::MatrixQ15& target,bool continuous,double seconds) noexcept {
+    const auto goal=to_quaternion(target);
+    const double elapsed=seconds-seconds_;
+    // Cuts, the first frame, and long gaps (pause, focus loss) start from the source.
+    if(!state_ || !continuous || !std::isfinite(elapsed) || elapsed>.25) {state_=goal;seconds_=seconds;return target;}
+    if(elapsed>0) {
+        auto eased=slerp(*state_,goal,1-std::exp(-elapsed/time_constant_seconds));
+        constexpr double limit=maximum_lag_degrees*std::numbers::pi/180;
+        const double lag=arc(eased,goal);
+        if(lag>limit) eased=slerp(eased,goal,1-limit/lag);
+        state_=eased;seconds_=seconds;
+    }
+    return to_matrix(*state_);
 }
 std::optional<SteeringMatrix> cockpit_steering_matrix(const GameSceneSnapshot& scene,
     const PresentationPreferences& preferences) {

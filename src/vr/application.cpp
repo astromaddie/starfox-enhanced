@@ -740,6 +740,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     unsigned sprite_uploads=0,sprite_reuses=0;
     bool cancelled=false;
     starfox::vr::Matrix4 presentation_transform=starfox::vr::identity_matrix;
+    starfox::vr::CockpitFollowEase follow_ease;
     starfox::vr::Matrix4 instrument_transform=starfox::vr::identity_matrix;
     starfox::vr::StartupMenu startup;
     startup.haptics_override=starfox::vr::env_override_float("haptics");
@@ -1021,8 +1022,15 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(!startup.open || startup.preview) {
                     instrument_transform=starfox::vr::presentation_instrument_matrix(*live->history->older(),
                         *live->history->previous(),*live->history->current(),alpha,startup.presentation);
+                    // Once per display frame: ease the attitude Follow ship rotation turns the world by.
+                    std::optional<starfox::simulation::MatrixQ15> follow_attitude;
+                    if(const auto attitude=starfox::vr::cockpit_follow_attitude(*live->history->older(),
+                        *live->history->previous(),*live->history->current(),alpha,startup.presentation))
+                        follow_attitude=follow_ease.update(attitude->rotation,attitude->continuous,double(time)*1e-9);
+                    else follow_ease.reset();
                     presentation_transform=starfox::vr::presentation_scene_matrix(*live->history->older(),
-                        *live->history->previous(),*live->history->current(),alpha,startup.presentation);
+                        *live->history->previous(),*live->history->current(),alpha,startup.presentation,
+                        follow_attitude?&*follow_attitude:nullptr);
                     const bool cockpit_active=pilot_view_active(*live->history->current(),startup.presentation);
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true,cockpit_active);
                     if(live->game.paused()) {

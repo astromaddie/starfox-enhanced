@@ -1051,3 +1051,23 @@ view equals the linear path half a tick later under steady motion (including a
 16-bit wrap), that the cabin matches, that position is continuous across ticks
 and velocity is continuous to within a tenth of the linear jump, and that cuts and
 non-cockpit views are handled. Headset-unverified.
+
+### Follow ship rotation ease (October 3)
+
+The wearer asked for turn smoothing in Follow ship rotation too. Tick smoothing
+only rounds the corners at ticks; the ship's own banks and rolls still reached
+the view at full rate. `CockpitFollowEase` now eases the attitude Follow turns the
+world by. It runs once per display frame from XR display time, as a quaternion
+slerp toward the B-spline source attitude with a 0.1 s time constant. It snaps on
+cuts, on the first frame and after gaps over 0.25 s, and never trails by more
+than 90° so fast barrel rolls keep their direction. `cockpit_follow_attitude`
+supplies the target; `presentation_scene_matrix` uses the eased attitude only for
+the follow rotation. The seat offset, cabin (fixed in Follow) and steering mapping
+(evaluated per source tick) stay on the source attitude, so during a fast roll
+the steering axes can differ from the displayed ones by up to the ease lag.
+
+Probe (same turn as above, Follow ON): peak world rotation rate drops from
+1,173 to 353°/s, angular-acceleration peaks from 24,000–96,000 to 2,700–7,700°/s²,
+and linear-acceleration peaks about 11x versus unsmoothed. Tests cover the
+round trip, the rate, settling, cut and pause snapping, the 90° cap, and that
+Follow OFF ignores the ease. Headset-unverified.

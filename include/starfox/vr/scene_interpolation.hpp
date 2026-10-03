@@ -16,8 +16,29 @@ Matrix4 presentation_scene_matrix(const GameSceneSnapshot&,const GameSceneSnapsh
 // smoothed camera. Outside the pilot view these match the two-snapshot forms.
 Matrix4 presentation_instrument_matrix(const GameSceneSnapshot& older,const GameSceneSnapshot& previous,
     const GameSceneSnapshot& current,double alpha,const PresentationPreferences&);
+// With Follow ship rotation, `follow_attitude` (from CockpitFollowEase) replaces
+// the ship attitude that turns the world; the seat stays on the source attitude.
 Matrix4 presentation_scene_matrix(const GameSceneSnapshot& older,const GameSceneSnapshot& previous,
-    const GameSceneSnapshot& current,double alpha,const PresentationPreferences&);
+    const GameSceneSnapshot& current,double alpha,const PresentationPreferences&,
+    const simulation::MatrixQ15* follow_attitude=nullptr);
+// The smoothed source ship attitude for Follow ship rotation, and whether it
+// continues from the previous tick. Empty outside a following pilot view.
+struct CockpitAttitude {simulation::MatrixQ15 rotation{};bool continuous{};};
+std::optional<CockpitAttitude> cockpit_follow_attitude(const GameSceneSnapshot& older,
+    const GameSceneSnapshot& previous,const GameSceneSnapshot& current,double alpha,const PresentationPreferences&);
+// Eases the attitude that Follow ship rotation turns the world by, once per
+// display frame, so banks and rolls reach the view smoothly. It snaps on cuts
+// and never trails the source by more than 90 degrees, so fast rolls keep their direction.
+class CockpitFollowEase {
+public:
+    static constexpr double time_constant_seconds=.1;
+    static constexpr double maximum_lag_degrees=90;
+    void reset() noexcept {state_.reset();}
+    [[nodiscard]] simulation::MatrixQ15 update(const simulation::MatrixQ15& target,bool continuous,double seconds) noexcept;
+private:
+    std::optional<std::array<double,4>> state_;
+    double seconds_{};
+};
 // Evaluate once per source input consumption from the completed source state,
 // never from XR time, interpolated display orientation, or physical head pose.
 std::optional<SteeringMatrix> cockpit_steering_matrix(const GameSceneSnapshot&,const PresentationPreferences&);
