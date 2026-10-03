@@ -1161,3 +1161,12 @@ decisions and every `[vr-perf]` line (now with `display=<Hz>`) also go to
 stdout is not kept on the Frame. Tests cover the menu cycle, persistence,
 v8 migration, the ENV label, 90 → 80 → 72 and 120 → 108 steps, release, and the
 floor. 120 Hz performance is unmeasured.
+
+### Refresh setting delivery (October 3)
+
+Workflow `37097198587` passed for `1b5cb83`. The package was uploaded over
+Wi-Fi as before. All files match by SHA-256 (`starfox_steamframe`
+`52f03745…47bf`). The device metadata names a clean `1b5cb83`, the game was not
+running and was not launched, and user data and Steam settings are unchanged.
+The `1d68555` runtime is kept in `~/devkit-game/_StarFoxEnhanced_prev/`. Saved
+v8 preferences load as REFRESH RATE 90 HZ.
