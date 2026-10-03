@@ -144,6 +144,16 @@ void verify_follow_ease() {
     const auto attitude=cockpit_follow_attitude(a,b,c,.4,prefs);require(attitude && attitude->continuous,"Follow attitude missing");
     close_matrix(presentation_scene_matrix(a,b,c,.4,prefs,&attitude->rotation),presentation_scene_matrix(a,b,c,.4,prefs));
     require(presentation_scene_matrix(a,b,c,.4,prefs,&start)!=presentation_scene_matrix(a,b,c,.4,prefs),"Follow attitude ignored");
+    // Content at the ship origin stays at the cabin's ship origin (-seat)
+    // whatever the eased attitude.
+    for(const auto* eased:{&attitude->rotation,&start}) {
+        auto before=b,now=c;render::ObjectPresentationSnapshot object;object.generation=1;object.rotation_matrix=rotation(0,0);
+        now.objects.emplace_back();now.objects.back().handle=900;now.objects.back().presentation=object;
+        before.transforms[900]=object;now.transforms[900]=object;
+        const auto model=*game_model_matrix(interpolate_scene_poses(before,now,.4,{}).back(),256);
+        const auto origin=point(presentation_scene_matrix(a,b,c,.4,prefs,eased),{model[12],model[13],model[14],1});
+        for(unsigned i=0;i<3;++i) require(std::abs(origin[i]+cockpit_seat_m[i])<.01F,"Follow ease moved the ship origin off the cabin");
+    }
     auto off=prefs;off.follow_ship_rotation=false;
     require(!cockpit_follow_attitude(a,b,c,.4,off),"Follow attitude outside Follow ship rotation");
     require(presentation_scene_matrix(a,b,c,.4,off,&start)==presentation_scene_matrix(a,b,c,.4,off),"Follow attitude changed Follow OFF");

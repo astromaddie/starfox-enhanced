@@ -88,6 +88,7 @@ void env_overrides() {
 std::vector<float> fake_rates{72.F,80.F,90.F,120.F};
 std::vector<float> requested_rates;
 float fake_current=0.F;
+bool ignore_requests=false;
 bool refuse_request=false;
 XrResult XRAPI_PTR fake_enumerate(XrSession,uint32_t capacity,uint32_t* count,float* out) {
     *count=static_cast<uint32_t>(fake_rates.size());
@@ -100,7 +101,7 @@ XrResult XRAPI_PTR fake_enumerate(XrSession,uint32_t capacity,uint32_t* count,fl
 XrResult XRAPI_PTR fake_get(XrSession,float* out) {*out=fake_current;return XR_SUCCESS;}
 XrResult XRAPI_PTR fake_request(XrSession,float rate) {
     if(refuse_request) return XR_ERROR_RUNTIME_FAILURE;
-    requested_rates.push_back(rate);fake_current=rate;return XR_SUCCESS;
+    requested_rates.push_back(rate);if(!ignore_requests && rate>0) fake_current=rate;return XR_SUCCESS;
 }
 void refresh_rates() {
     const std::vector<float> offered{72.F,80.F,90.F,120.F};
@@ -166,6 +167,10 @@ void refresh_rates() {
     require(floor_step==72.F && governor.fell_back());
     require(governor.request(session,*floor_step) && requested_rates.back()==72.F);
     for(int i=0;i<5;++i) require(!run_window(10)); // Nothing below the floor.
+    // Choosing a rate again after reaching the floor governs again.
+    require(governor.request(session,120.F) && !governor.fell_back() && governor.requested()==120.F);
+    require(!governor.observe(t,true));require(!run_window(60));
+    require(run_window(60)==90.F);
 
     // A 120 Hz target steps 120 -> 108 on the Frame's offered rates.
     fake_rates={72.F,80.F,90.F,96.F,108.F,120.F,144.F};fake_current=60.F;
@@ -173,7 +178,16 @@ void refresh_rates() {
     std::optional<float> step;
     for(int i=0;i<2*100*10+10 && !step;++i) {t+=.01;if(const auto d=fast.observe(t,true)) step=d;}
     require(step==108.F && !fast.fell_back());
-    fast.release();require(!fast.requested() && !fast.observe(t+20,true));
+    // A runtime that ignores the request: the next step goes below what was
+    // asked for (108 -> 96), not back to the same 108.
+    ignore_requests=true;require(fast.request(session,*step) && fast.requested()==108.F);
+    step.reset();
+    for(int i=0;i<2*100*10+10 && !step;++i) {t+=.01;if(const auto d=fast.observe(t,true)) step=d;}
+    require(step==96.F);ignore_requests=false;
+    // SYSTEM asks for no preference (0 Hz) and keeps current() reported.
+    fast.release();require(!fast.requested() && requested_rates.back()==0.F);
+    fake_current=144.F;for(int i=0;i<1200;++i) {t+=.01;require(!fast.observe(t,true));}
+    require(fast.current()==144.F);
     fake_rates={72.F,80.F,90.F,120.F};
 
     // Already at or below the fallback: nothing to drop to.

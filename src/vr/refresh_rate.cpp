@@ -54,14 +54,20 @@ bool RefreshRate::request(XrSession session,float target) {
     requested_=*chosen;
     float actual=0.F;
     current_=XR_SUCCEEDED(api_.get(session,&actual)) && actual>0.F?actual:*chosen;
-    // Restart the governor: a new target is measured from scratch.
-    started_=tainted_=false;frames_=0;low_windows_=0;
+    // Restart the governor: a new target is measured from scratch, and a new
+    // choice after reaching the floor is governed again.
+    started_=tainted_=fell_back_=false;frames_=0;low_windows_=0;
     status_="Display refresh rate requested";
     return true;
 }
 
+void RefreshRate::release() noexcept {
+    if(api_.request && session_!=XR_NULL_HANDLE) static_cast<void>(api_.request(session_,0.F));
+    requested_.reset();fell_back_=started_=false;low_windows_=0;
+    status_="Display refresh rate left to the system";
+}
 std::optional<float> RefreshRate::observe(double now,bool focused) noexcept {
-    if(!requested_ || fell_back_) return std::nullopt;
+    if(session_==XR_NULL_HANDLE) return std::nullopt;
     if(!started_) {started_=true;window_start_=now;frames_=0;tainted_=!focused;}
     if(!focused) tainted_=true;
     ++frames_;
@@ -71,6 +77,7 @@ std::optional<float> RefreshRate::observe(double now,bool focused) noexcept {
         float actual=0.F;
         if(XR_SUCCEEDED(api_.get(session_,&actual)) && actual>0.F) current_=actual;
     }
+    if(!requested_ || fell_back_) {window_start_=now;frames_=0;tainted_=false;return std::nullopt;}
     const double reference=current_?*current_:*requested_;
     // A window with any unfocused frame says nothing about performance.
     if(tainted_) low_windows_=0;
@@ -78,10 +85,12 @@ std::optional<float> RefreshRate::observe(double now,bool focused) noexcept {
     else low_windows_=0;
     window_start_=now;frames_=0;tainted_=false;
     if(low_windows_<low_windows_before_fallback) return std::nullopt;
-    // Step to the next lower offered rate, never below the floor.
+    // Step below whichever is lower of the reported and the requested rate, so
+    // a runtime that ignores a request does not get the same rate forever.
+    const double from=std::min(reference,double(*requested_));
     std::optional<float> lower;
     for(const float rate:offered_)
-        if(std::isfinite(rate) && rate>=fallback_rate-.5F && rate<reference-.5 && (!lower || rate>*lower)) lower=rate;
+        if(std::isfinite(rate) && rate>=fallback_rate-.5F && rate<from-.5 && (!lower || rate>*lower)) lower=rate;
     low_windows_=0;
     if(!lower) return std::nullopt; // Already at the lowest usable rate.
     if(*lower<=fallback_rate+.5F) fell_back_=true;

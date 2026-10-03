@@ -41,11 +41,12 @@ public:
     // Enumerate, choose and request for `target` Hz. False when the extension is
     // unavailable, nothing is offered, or the runtime refuses (status() says why).
     bool request(XrSession session,float target);
-    // Stop requesting and governing; the runtime's own rate applies from the
-    // next session (a request already made cannot be withdrawn).
-    void release() noexcept {requested_.reset();fell_back_=false;status_="Display refresh rate left to the system";}
+    // Stop governing and request 0 Hz, which the extension defines as no
+    // preference, so the system refresh setting applies again.
+    void release() noexcept;
     // One call per submitted stereo frame. Returns the next lower offered rate
     // to pass to request() when the governor steps down; nothing once at 72 Hz.
+    // current() keeps updating at each window end, even when not governing.
     [[nodiscard]] std::optional<float> observe(double now_seconds,bool focused) noexcept;
     [[nodiscard]] std::optional<float> requested() const noexcept {return requested_;}
     // The rate the runtime reports now, refreshed at each window end.

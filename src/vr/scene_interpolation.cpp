@@ -104,8 +104,11 @@ Matrix4 scene_matrix(const PilotPose& pose,const PresentationPreferences& prefer
     const double local[]{(preferences.origin_x*.01+cockpit_seat_m[0])*256/scale,
         -(preferences.origin_y*.01+cockpit_seat_m[1])*256/scale,
         -(preferences.origin_z*.01+cockpit_seat_m[2])*256/scale};
+    // With the Follow ease the seat pivots with the eased attitude too, so
+    // content at the ship origin (shots, effects) stays on the cabin's ship.
+    const auto& seat_rotation=preferences.follow_ship_rotation && follow_attitude?*follow_attitude:pose.rotation;
     double point[]{pose.player.x,pose.player.y,pose.player.z};
-    for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) point[r]+=local[c]*pose.rotation[c*3+r]/32768.;
+    for(unsigned r=0;r<3;++r) for(unsigned c=0;c<3;++c) point[r]+=local[c]*seat_rotation[c*3+r]/32768.;
     const double origin[]{pose.camera.x,pose.camera.y,pose.camera.z};
     double delta[3]{};
     for(unsigned i=0;i<3;++i) delta[i]=wrapped_delta(point[i],origin[i]);

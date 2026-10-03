@@ -1266,3 +1266,26 @@ later normal launch never inherits diagnostic mode. Arm a run by writing, for
 example, `SFX_VR_FORCE_RENDER=1`, `SFX_VR_AUTOSTART=LEVEL1_1`,
 `SFX_VR_EXIT_AFTER=120` and `SFX_VR_REFRESH_RATE=120` on separate lines, then
 launch through `steam.pipe` while holding the Frame lock.
+
+### Review fixes (October 4)
+
+An independent read-only review of 28b1d37..bd4e2da found no crash, NaN or
+math error, and confirmed that the smoothing correction and the credits glyphs
+are exact. Fixed:
+- With the Follow ease, the seat offset now pivots with the eased attitude. The
+  world turned by the eased attitude while the eye's seat offset used the source
+  one, so content at the ship origin drifted off the cabin's ship during rolls
+  (up to about 1.3 m at the 90° cap). Steering still uses the source attitude
+  per tick, by design.
+- `RefreshRate::request` clears `fell_back_`, so choosing a rate after the floor
+  is governed again.
+- SYSTEM requests 0 Hz ("no preference" in XR_FB_display_refresh_rate), so the
+  system rate applies at once. `current()` keeps updating for the `[vr-perf]`
+  `display=` field.
+- The step-down starts below the lower of the reported and requested rates, so a
+  runtime that ignores a request does not get the same rate again.
+- Doc correction: frames keep arriving while paused, so the Follow ease does not
+  snap on pause; it settles in about 0.3 s. It snaps on cuts and on the first frame.
+Not changed: the lost-wing trim assumes the live ship's pose scale is 1, as seen
+in the cartridge test; clipped hull vertices interpolate only position, colour
+and UV, which is enough for MY_DEMOS's flat faces.
