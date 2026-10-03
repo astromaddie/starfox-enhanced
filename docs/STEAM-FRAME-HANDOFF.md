@@ -1256,3 +1256,13 @@ and its unattended run on October 2 held 72 fps, which is encouraging), whether 
 refresh request in standby, whether it throttles `xrWaitFrame` while the
 headset is off the head (then the numbers are not the worn numbers), and how
 the env reaches the process through the Devkit launcher.
+
+### Arming an unattended run (October 4)
+
+Steam launches the title with fixed arguments, so `LAUNCH-STEAM-FRAME.sh` now
+reads a one-shot `~/.local/share/StarFoxEnhanced/vr-diagnostics.env`. It exports
+only `SFX_VR_*=value` lines and deletes the file before the game starts, so a
+later normal launch never inherits diagnostic mode. Arm a run by writing, for
+example, `SFX_VR_FORCE_RENDER=1`, `SFX_VR_AUTOSTART=LEVEL1_1`,
+`SFX_VR_EXIT_AFTER=120` and `SFX_VR_REFRESH_RATE=120` on separate lines, then
+launch through `steam.pipe` while holding the Frame lock.
