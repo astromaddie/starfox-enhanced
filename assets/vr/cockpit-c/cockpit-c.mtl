@@ -228,3 +228,17 @@ Ka 0 0 0
 Ks 0 0 0
 d 1
 illum 1
+
+newmtl panel_rear_hoop
+Kd 0.745098 0.780392 0.788235
+Ka 0 0 0
+Ks 0 0 0
+d 1
+illum 1
+
+newmtl edge_rear_hoop
+Kd 0.556863 0.603922 0.627451
+Ka 0 0 0
+Ks 0 0 0
+d 1
+illum 1

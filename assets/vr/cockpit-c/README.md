@@ -1,8 +1,10 @@
 # Cockpit C presentation assets
 
-These ten rear modules and flat materials are newly authored assets. Seven come
-from the user-approved C package; the three `rear_bulkhead_*` boxes (October 3,
-wearer request) close the cabin behind the seat at shoulder height. The JSON retains the editable module pivots, triangles
+These thirteen rear modules and flat materials are newly authored assets. Seven
+come from the user-approved C package. Wearer requests on October 3 added three
+`rear_bulkhead_*` boxes, closing the cabin behind the seat at shoulder height, and
+three `rear_hoop_*` beams, joining the window-frame strut tips to the bulkhead rim
+and to each other. The JSON retains the editable module pivots, triangles
 and per-face material assignments; OBJ/MTL files are the corresponding editable
 exports. `tools/generate_cockpit_assets.py` compiles only this new geometry and
 material metadata into `src/vr/cockpit_assets.inc`.

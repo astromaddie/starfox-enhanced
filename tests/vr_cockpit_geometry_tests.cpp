@@ -20,8 +20,19 @@ std::array<float,3> point(const Matrix4& m,const float* p) {
 }
 void near(float a,float b,const std::source_location& where=std::source_location::current()) {require(std::abs(a-b)<.001F,where);}
 void verify_rig() {
-    auto rear=cockpit_rear_packet();require(rear.geometry.vertices.size()==10*12*3); // walls, floor, rear bulkhead
-    for(const auto& v:rear.geometry.vertices)require(v.position[1]<-.28F && !v.visibility_enabled && !v.texture[3]); // below the eye: shoulder-height bulkhead
+    auto rear=cockpit_rear_packet();require(rear.geometry.vertices.size()==13*12*3); // walls, floor, rear bulkhead, roll hoop
+    // Rear modules stay clear of the head and never reach the forward view.
+    for(const auto& v:rear.geometry.vertices)require(std::hypot(v.position[0],v.position[1],v.position[2])>.5F
+        && v.position[2]>-1.2F && !v.visibility_enabled && !v.texture[3]);
+    // The roll hoop joins the bulkhead rim to the window-frame strut tips (flared to about +/-2.04, 0.86, 0.32).
+    for(float side:{-1.F,1.F}) {
+        bool tip=false,shoulder=false;
+        for(const auto& v:rear.geometry.vertices) {
+            tip|=std::hypot(v.position[0]-side*2.04F,v.position[1]-.86F,v.position[2]-.32F)<.08F;
+            shoulder|=std::hypot(v.position[0]-side*1.122F,v.position[1]+.29F,v.position[2]-.63F)<.08F;
+        }
+        require(tip && shoulder);
+    }
     auto black=cockpit_rear_packet(false,0);for(const auto& v:black.geometry.vertices)require(v.color[0]==0 && v.color[3]==1);
     // Source units; +Z is forward. The first triangle lies wholly on the nose,
     // ahead of the cabin. The second reaches back into the tub and is cut.
@@ -144,7 +155,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
         const float edge=25.F/256*cockpit_ship_scale;
         require(std::abs(high-edge)<.01F && low<-3.F);
     }
-    require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==360 && !cabin[2].geometry.vertices.empty());
+    require(cabin[0].geometry.vertices.size()==366 && cabin[1].geometry.vertices.size()==468 && !cabin[2].geometry.vertices.empty());
     // The live hull surrounds the canopy seat: nose ahead, wings beside and behind.
     const auto player_slot=std::find(before.handles.begin(),before.handles.end(),scene.player);require(player_slot!=before.handles.end());
     const auto& source_player=before.packets[size_t(player_slot-before.handles.begin())];
@@ -330,7 +341,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     require(visible>0 && hidden>0);
     std::cout<<(scene.meters.extended?"EX":"Original")<<" seeded native repair flash: "<<visible
         <<" visible and "<<hidden<<" hidden phases, complete source geometry/materials and common ship-rig registration passed\n";
-    std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: 122 front + 120 rear + "
+    std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: 122 front + 156 rear + "
         <<cabin[2].geometry.vertices.size()/3<<" player hull triangles; source state/other objects/HUD art unchanged\n";
 }
 }

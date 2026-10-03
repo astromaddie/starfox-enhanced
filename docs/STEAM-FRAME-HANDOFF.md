@@ -1114,3 +1114,16 @@ hull's +X edge to 2.34 m while −X stays past 3 m; head clearance, instrument
 visibility, repair-flash placement and registration still pass, with 120 rear
 triangles. Production CPU views:
 `build/cockpit-mockups/ending-arwing-24x-production-2026-10-03.png`. Headset-unverified.
+
+### Rear roll hoop (October 3)
+
+Wearer request: the window frame should physically connect to the rear bulkhead.
+The flared upper struts of the source frame end in free space at about (±2.04,
+0.86, 0.32) m. Three new 6 cm beams (`rear_hoop_left/right/bar`, 36 triangles,
+silver frame materials) are authored in the unflared rear-module space, where
+runtime flaring is affine. Two posts rise from the bulkhead rim's top corners
+(flared ±1.12, -0.29, 0.63) to the strut tips, and a crossbar joins the tips above
+and behind the head. The rig test checks that both joints are within 8 cm and
+that every rear vertex is at least 0.5 m from the eye and behind z = -1.2 m.
+The rear packet is 156 triangles. Production CPU views:
+`build/cockpit-mockups/roll-hoop-production-2026-10-03.png`. Headset-unverified.
