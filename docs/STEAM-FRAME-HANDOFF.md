@@ -1419,3 +1419,24 @@ To check on the device, run the 75% LEVEL1_1 forced capture with and without
 sum. If it helps but isn't enough, the next step is calling `xrEndFrame` before the
 fences and waiting at the start of the next frame's per-frame block instead, so the
 game tick and uploads overlap the GPU too.
+
+### Overlap results (October 4)
+
+`b7b89bf` ran unattended on LEVEL1_1 at 90 Hz in four 90 s runs. Logs:
+`build/frame-devkit/runs/b7b89bf-forced-LEVEL1_1-90hz-{serial,overlap}-{1.0,0.75}.log`.
+
+| Mode | Eye buffers | fps per 10 s window | Mean fps | Missed total | Notes |
+| --- | --- | --- | --- | --- | --- |
+| serial | 2016² | 50, 55, 46, then 45 | 47 | 85 | GPU 11.4–16.2 ms |
+| overlap | 2016² | 50, 57, 52, 48, then 45 | 48 | 138 | span 15–20 ms; no gain |
+| serial | 1512² | 57, 84, 90, 85, 81, 69, 55, 85 | 76 | 371 | |
+| overlap | 1512² | 67, 87, 90, 88, 86, 77, 59, 87 | 80 | 317 | span 10–13.5 ms |
+
+Overlap is correct (no failures or corruption in the logs) and helps a little at
+75%: about 5% more frames and 15% fewer misses. It doesn't help at 100%, which is
+GPU-bound. At 75% the span from eye 0's submit to eye 1's fence (10–13.5 ms) is
+still about 3 ms above the summed GPU time (7–10.5 ms). That remaining wait sits
+outside the eye work, most likely queueing behind the SteamVR compositor, which
+overlap cannot remove. The heavier stretch of Corneria (windows 5–7) still drops
+to 55–77 fps at 75%. Holding 90 Hz there needs either less GPU work per pixel
+(shader cost) or about 65–70% resolution. Overlap stays opt-in.
