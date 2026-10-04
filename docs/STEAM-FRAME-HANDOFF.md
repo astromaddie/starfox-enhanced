@@ -1493,3 +1493,8 @@ grab something. The beam and dot should stay visible over the panel, cockpit and
 HUD; the beam should start at the controller and not shimmer badly at half size. The
 `[vr] pointer layer WxH, format N` line appears the first time the sandbox opens.
 Also watch frame time while paused, since the pointer adds two small submissions.
+The pause sandbox opens on every pause, so the pointer layer is created on the
+first pause of each session. Its creation is non-fatal: on any failure the
+session logs `[vr] pointer layer unavailable; drawing the pointer in the eye
+pass: ...`, closes the partial objects, and draws the beam in the eye pass as
+before, rather than ending the game.

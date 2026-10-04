@@ -754,7 +754,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::VulkanStereoDraw pointer_draw(pointer_commands,pointer_targets);
     starfox::vr::CompositionLayers composition_layers(pointer_images);
     std::array<starfox::vr::EyeCamera,2> pointer_cameras{};
-    bool pointer_layer_ready=false;
+    bool pointer_layer_ready=false,pointer_layer_failed=false;
     const auto ensure_pointer_layer=[&] {
         if(pointer_layer_ready) return;
         // Half the eye buffers is plenty for a beam and a dot. The image is
@@ -1155,8 +1155,15 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         for(auto& hand:hands) if(hand) *hand=renderer.anchored_pose(*hand);
                         auto pointer=sandbox.update(hands,{controls.roll_left,controls.roll_right});
                         sandbox.apply(packets);
-                        ensure_pointer_layer();
-                        if(!sandbox_pointer.initialize(device.binding().device,get_device,properties,pointer_targets.render_pass(),
+                        // The sandbox opens on every pause, so a pointer layer the runtime
+                        // refuses must not end the game: fall back to the eye pass once.
+                        if(!pointer_layer_failed) try {ensure_pointer_layer();}
+                        catch(const std::exception& error) {
+                            pointer_layer_failed=true;pointer_targets.close();pointer_images.close();pointer_commands.close();
+                            session_log(std::string("[vr] pointer layer unavailable; drawing the pointer in the eye pass: ")+error.what());
+                        }
+                        if(!sandbox_pointer.initialize(device.binding().device,get_device,properties,
+                            pointer_layer_ready?pointer_targets.render_pass():targets.render_pass(),
                             std::span<const starfox::vr::DrawPacket>(&pointer,1),{},false))
                             throw std::runtime_error(sandbox_pointer.status());
                     }
@@ -1711,6 +1718,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         throw std::runtime_error("Bomb circle recording failed");
                 };
                 if(!circle_over_hud) draw_circle();
+                if(render_game && sandbox.active() && !pointer_layer_ready && !sandbox_pointer.record(command,extent,eye_camera))
+                    throw std::runtime_error("Sandbox pointer recording failed");
                 if(render_game && !world_panel_scene(*live->history->current()) && !sprites.record(command,extent,eye_camera))
                     throw std::runtime_error("Native sprite layer recording failed");
                 auto instrument_camera=tracking_camera;
