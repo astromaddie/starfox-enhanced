@@ -1458,3 +1458,38 @@ cutscene hull and canopy seat, cockpit motion smoothing and the Follow ease,
 and the opening credits. Still open: worn frame-time numbers ([vr-perf]
 while worn), the RENDER RESOLUTION and REFRESH RATE settings in the headset, and
 the opt-in overlap mode.
+
+## Pointer always on top (October 4)
+
+Untested on the device. Covered by the host build and injected-fake unit tests only.
+
+The pause-mode sandbox pointer used to be drawn into the eye pass, before sprites,
+cabin and HUD, and the paused SNES screen is a quad layer submitted after the eye
+layer, so the compositor drew the panel over the beam. Under the cross-port pointer
+rule (it composites over everything), the pointer now has its own projection layer:
+
+- A second pair of per-eye swapchains at half the eye buffer size, same format
+  preference as the eyes, created the first time the sandbox opens. No depth.
+- After both eyes and the UI quad, each pointer eye is cleared to (0,0,0,0) and
+  draws only the beam and an end dot, using the existing opaque line and triangle
+  pipelines (no shader change). They write the vertex colour, alpha included, and the
+  pointer vertices carry alpha 1. Cleared transparent black plus opaque pixels is
+  already premultiplied, so the layer sets `BLEND_TEXTURE_SOURCE_ALPHA` and not
+  `UNPREMULTIPLIED_ALPHA`, and the compositor's filtering of the half-size image
+  gives clean edges.
+- The layer goes last, after the quad: eye layer, UI quad, pointer. It uses the same
+  views, poses and space as the eye layer and the same scene camera the beam was
+  drawn with before, so the beam still lines up with the world.
+- The end dot is an eye-facing disc at the beam's end (the hit, or 128 m on a miss),
+  about 0.9° across, using the existing billboard (4) and disc (4096) vertex flags.
+- When the sandbox isn't active nothing changes: no pointer swapchain work, the same
+  two layers and the same eye pass, minus the pointer draw that used to be in it.
+- Composition keeps its progress across pending retries, so a released UI or
+  pointer image is never acquired twice in a frame. A failure cancels both and
+  returns every image.
+
+To check on the device: pause, aim at the paused screen and past its edges, and
+grab something. The beam and dot should stay visible over the panel, cockpit and
+HUD; the beam should start at the controller and not shimmer badly at half size. The
+`[vr] pointer layer WxH, format N` line appears the first time the sandbox opens.
+Also watch frame time while paused, since the pointer adds two small submissions.

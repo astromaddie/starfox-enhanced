@@ -18,6 +18,8 @@ class PauseSandbox {
     static V add(V a,V b) {for(unsigned i=0;i<3;++i)a[i]+=b[i];return a;}
     static V point(V o,V d,float t) {for(unsigned i=0;i<3;++i)o[i]+=d[i]*t;return o;}
 public:
+    // End dot: an eye-facing quad (billboard flag 4) cut to a disc (flag 4096).
+    static constexpr uint32_t end_dot_flags=4U|4096U;
     bool active() const noexcept {return active_;}
     void begin(const SourceModelPackets& packets,const GameSceneSnapshot& snapshot) {
         items_.clear();grabs_={};armed_={};view_=snapshot.view_matrix;active_=true;
@@ -79,10 +81,19 @@ public:
                     items_[grab.index].offset[axis]=std::clamp(grab.offset[axis]+target[axis]-grab.start[axis],-100.F,100.F);
             }
             const auto end=point(origin,direction,distance);
+            // Alpha 1 is load-bearing: the pointer layer's alpha comes straight from it.
+            SceneVertex vertex{};vertex.color[0]=grabs_[hand]?1.F:0.F;vertex.color[1]=1;vertex.color[2]=grabs_[hand]?0.F:1.F;vertex.color[3]=1;
             for(const auto& position:{origin,end}) {
-                SceneVertex vertex{};std::copy(position.begin(),position.end(),vertex.position);
-                vertex.color[0]=grabs_[hand]?1.F:0.F;vertex.color[1]=1;vertex.color[2]=grabs_[hand]?0.F:1.F;vertex.color[3]=1;
+                std::copy(position.begin(),position.end(),vertex.position);
                 pointer.geometry.line_vertices.push_back(vertex);
+            }
+            // About 0.9 degrees across at any distance, so a far hit stays visible.
+            const float radius=std::max(.004F,distance*.008F);
+            constexpr float corners[4][2]{{-1,-1},{1,-1},{1,1},{-1,1}};
+            vertex.texture[3]=end_dot_flags;
+            for(unsigned i:{0U,1U,2U,0U,2U,3U}) {
+                for(unsigned axis=0;axis<2;++axis) {vertex.uv[axis]=corners[i][axis];vertex.billboard[axis]=corners[i][axis]*radius;}
+                pointer.geometry.vertices.push_back(vertex);
             }
         }
         return pointer;

@@ -611,6 +611,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         {ui_handles,{}},ui_extents,ui_depth.format(),{ui_depth.views()[0],VK_NULL_HANDLE})) {
         std::cerr<<ui_targets.status()<<'\n';return 7;
     }
+    // The pause pointer's own projection layer, created the first time the
+    // sandbox opens. It is submitted after every quad, so nothing covers it.
+    starfox::vr::OpenXrSwapchains pointer_images;
+    starfox::vr::VulkanEyeTargets pointer_targets;
     starfox::vr::VulkanPipelineCache shader_cache;
     starfox::vr::VulkanDrawPackets scene;
     starfox::vr::VulkanSourceScene compute_scene;
@@ -704,6 +708,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     auto& right_eye_commands=diagnostics.overlap_eyes?right_commands:commands;
     starfox::vr::VulkanEyeCommands ui_commands;
     if(!ui_commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) return 8;
+    starfox::vr::VulkanEyeCommands pointer_commands;
     if(profile_csv.enabled()) {
         XrInstanceProperties runtime_properties{XR_TYPE_INSTANCE_PROPERTIES};
         std::string runtime_name="unknown";std::string runtime_version="unknown";
@@ -746,6 +751,39 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     bool ui_was_visible=false;
     unsigned recenter_revision=0;
     starfox::vr::VulkanStereoDraw draw(commands,targets,diagnostics.overlap_eyes?&right_commands:nullptr);
+    starfox::vr::VulkanStereoDraw pointer_draw(pointer_commands,pointer_targets);
+    starfox::vr::CompositionLayers composition_layers(pointer_images);
+    std::array<starfox::vr::EyeCamera,2> pointer_cameras{};
+    bool pointer_layer_ready=false;
+    const auto ensure_pointer_layer=[&] {
+        if(pointer_layer_ready) return;
+        // Half the eye buffers is plenty for a beam and a dot. The image is
+        // cleared to transparent black and drawn opaque, so it is already
+        // premultiplied and the compositor's filtering stays correct.
+        auto views=eye_views;
+        for(auto& view:views) {
+            view.recommendedImageRectWidth=std::max(64U,(view.recommendedImageRectWidth/2)&~3U);
+            view.recommendedImageRectHeight=std::max(64U,(view.recommendedImageRectHeight/2)&~3U);
+        }
+        if(!pointer_commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device))
+            throw std::runtime_error(pointer_commands.status());
+        if(!pointer_images.initialize(session.handle(),views,formats,XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT))
+            throw std::runtime_error(pointer_images.status());
+        std::array<std::vector<VkImage>,2> handles;std::array<VkExtent2D,2> extents{};
+        for(unsigned eye=0;eye<2;++eye) {
+            std::vector<XrSwapchainImageVulkan2KHR> images(pointer_images.image_count(eye),{XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR});
+            uint32_t count{};
+            if(images.empty() || !pointer_images.enumerate_images(eye,uint32_t(images.size()),&count,
+                reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())) || count!=images.size())
+                throw std::runtime_error("Pointer image enumeration failed: "+pointer_images.status());
+            for(const auto& image:images) handles[eye].push_back(image.image);
+            extents[eye]={views[eye].recommendedImageRectWidth,views[eye].recommendedImageRectHeight};
+        }
+        if(!pointer_targets.initialize(device.binding().device,get_device,static_cast<VkFormat>(pointer_images.format()),
+            {handles[0],handles[1]},extents)) throw std::runtime_error(pointer_targets.status());
+        pointer_layer_ready=true;
+        std::cout<<"[vr] pointer layer "<<extents[0].width<<'x'<<extents[0].height<<", format "<<pointer_images.format()<<'\n';
+    };
     starfox::vr::StereoRenderer renderer(session,swapchains,render_game);
     renderer.set_overlap_eyes(diagnostics.overlap_eyes);
     bool overlap_frame=false;
@@ -914,7 +952,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             if(!input_time || time!=*input_time) {
                 // Every eye and UI fence was observed before the last frame
                 // ended, overlap included, so nothing below races GPU reads.
-                if(draw.pending() || ui_draw.pending()) {
+                if(draw.pending() || ui_draw.pending() || pointer_draw.pending()) {
                     game_error="Eye work still in flight at a new frame";return starfox::vr::StereoRenderer::EyeResult::fatal;
                 }
                 cpu_frame_profile={};eye_frame_profile={};ui_frame_profile.reset();
@@ -1117,7 +1155,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         for(auto& hand:hands) if(hand) *hand=renderer.anchored_pose(*hand);
                         auto pointer=sandbox.update(hands,{controls.roll_left,controls.roll_right});
                         sandbox.apply(packets);
-                        if(!sandbox_pointer.initialize(device.binding().device,get_device,properties,targets.render_pass(),
+                        ensure_pointer_layer();
+                        if(!sandbox_pointer.initialize(device.binding().device,get_device,properties,pointer_targets.render_pass(),
                             std::span<const starfox::vr::DrawPacket>(&pointer,1),{},false))
                             throw std::runtime_error(sandbox_pointer.status());
                     }
@@ -1568,6 +1607,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             }
             auto camera=tracking_camera;
             camera.view=multiply_matrix(tracking_camera.view,presentation_transform);
+            if(eye<2) pointer_cameras[eye]=camera;
             bool ray_ready=false;
             // Fixed by the per-frame block above for both eyes. Ray frames stay
             // serial: eye 1's ray producer reruns the shared compute pre-pass.
@@ -1671,8 +1711,6 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         throw std::runtime_error("Bomb circle recording failed");
                 };
                 if(!circle_over_hud) draw_circle();
-                if(render_game && sandbox.active() && !sandbox_pointer.record(command,extent,eye_camera))
-                    throw std::runtime_error("Sandbox pointer recording failed");
                 if(render_game && !world_panel_scene(*live->history->current()) && !sprites.record(command,extent,eye_camera))
                     throw std::runtime_error("Native sprite layer recording failed");
                 auto instrument_camera=tracking_camera;
@@ -1705,6 +1743,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             return eye_result;
         },1.0F,0.05F,std::nullopt,{
             [&](const StereoFrame& frame,std::vector<const XrCompositionLayerBaseHeader*>& layers) {
+              // Shown wherever the eye pass used to draw the pointer.
+              const bool pointer=render_game && pointer_layer_ready && sandbox.active() && live
+                  && (!startup.open || startup.preview)
+                  && (!world_panel_scene(*live->history->current()) || live->history->current()->paused);
+              return composition_layers.draw(frame,session.space(),pointer,
+                [&](const StereoFrame& frame,const XrCompositionLayerBaseHeader*& layer) {
                 const bool source_panel=live && world_panel_scene(*live->history->current());
                 const bool visible=startup.open || source_panel;
                 if(frame.tracking_origin_changed || visible!=ui_was_visible) ui_anchor.reset();
@@ -1745,9 +1789,15 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 const float distance=overlay?overlay_panel_distance:interface_panel_distance;
                 const auto* quad=ui_images.layer(session.space(),ui_anchor.pose(frame.views,distance),panel_width_at(distance));
                 if(!quad) return StereoRenderer::EyeResult::failed;
-                layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(quad));
+                layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(quad);
                 return StereoRenderer::EyeResult::complete;
-            },[&] {return ui_images.cancel();}});
+              },[&](unsigned eye,uint32_t image,XrTime time) {
+                return pointer_draw.draw(eye,image,pointer_cameras[eye],time,VkClearColorValue{{0,0,0,0}},
+                    [&](VkCommandBuffer command,VkExtent2D extent,const EyeCamera& camera,XrTime) {
+                        if(!sandbox_pointer.record(command,extent,camera)) throw std::runtime_error("Sandbox pointer recording failed");
+                    });
+              },layers);
+            },[&] {return composition_layers.cancel([&] {return ui_images.cancel();});}});
         using Result=starfox::vr::StereoRenderer::Result;
         if(session.state()!=XR_SESSION_STATE_FOCUSED) {
             input.poll(false);

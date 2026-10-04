@@ -18,7 +18,7 @@ void OpenXrSwapchains::close() noexcept {
     frame_=false;format_=0;layer_={XR_TYPE_COMPOSITION_LAYER_PROJECTION};
 }
 bool OpenXrSwapchains::initialize(XrSession session,std::span<const XrViewConfigurationView> config,
-    std::span<const int64_t> preferred) {
+    std::span<const int64_t> preferred,XrCompositionLayerFlags layer_flags) {
     close();
     try {
         if(session==XR_NULL_HANDLE || config.size()!=2 || preferred.empty())
@@ -54,6 +54,7 @@ bool OpenXrSwapchains::initialize(XrSession session,std::span<const XrViewConfig
             views_[i].subImage.swapchain=eyes_[i].handle;
             views_[i].subImage.imageRect.extent={static_cast<int32_t>(create.width),static_cast<int32_t>(create.height)};
         }
+        layer_.layerFlags=layer_flags;
         status_="OpenXR eye swapchains ready";return true;
     } catch(const std::exception& e) {status_=e.what();close();return false;}
 }

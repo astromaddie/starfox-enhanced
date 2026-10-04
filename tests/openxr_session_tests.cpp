@@ -21,6 +21,7 @@ struct Fake {
     uint32_t submitted=99;
     XrTime submitted_time{};
     XrTime predicted_time{123456};
+    std::vector<const XrCompositionLayerBaseHeader*> layers;
 } fake;
 // Renderer event order: 10+eye queued, 20+eye pending poll, 30+eye fence
 // observed, 40+eye failed, 50+eye image released, 60/61 composition draw/cancel, 7 end frame.
@@ -68,7 +69,8 @@ XrResult XRAPI_PTR wait(XrSession,const XrFrameWaitInfo*,XrFrameState* out) {
 }
 XrResult XRAPI_PTR begin_frame(XrSession,const XrFrameBeginInfo*) {fake.calls.push_back(5);return XR_SUCCESS;}
 XrResult XRAPI_PTR end_frame(XrSession,const XrFrameEndInfo* info) {
-    fake.calls.push_back(7);order.push_back(7);fake.submitted=info->layerCount;fake.submitted_time=info->displayTime;++fake.end_calls;
+    fake.calls.push_back(7);order.push_back(7);fake.submitted=info->layerCount;
+    fake.layers.assign(info->layers,info->layers+info->layerCount);fake.submitted_time=info->displayTime;++fake.end_calls;
     require(info->environmentBlendMode==XR_ENVIRONMENT_BLEND_MODE_OPAQUE,"preferred opaque blend not selected");
     return fake.refuse_layers && info->layerCount?XR_ERROR_LAYER_INVALID:XR_SUCCESS;
 }
@@ -259,10 +261,82 @@ void overlap_renderer() {
     require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::error && order.size()==2,"fatal overlap frame reused");
     eye_chains={};
 }
+// The pause pointer is its own alpha-blended projection layer, submitted after
+// the UI quad so nothing covers it, and absent (no acquire) when inactive.
+void pointer_layer() {
+    fake=Fake{};image_pending=false;acquisitions=released=0;
+    OpenXrSession session(api());start(session);
+    std::array<XrViewConfigurationView,2> config{};
+    for(auto& eye:config) {
+        eye.recommendedImageRectWidth=eye.recommendedImageRectHeight=100;
+        eye.maxImageRectWidth=eye.maxImageRectHeight=100;eye.maxSwapchainSampleCount=1;
+    }
+    const std::array<int64_t,1> preferred{43};
+    OpenXrSwapchains chains({formats,swap_create,swap_destroy,images,acquire,image_wait,release});
+    OpenXrSwapchains pointer_chains({formats,swap_create,swap_destroy,images,acquire,image_wait,release});
+    require(chains.initialize(session.handle(),config,preferred),"pointer fixture eyes failed");
+    for(auto& eye:config) eye.recommendedImageRectWidth=eye.recommendedImageRectHeight=50;
+    require(pointer_chains.initialize(session.handle(),config,preferred,XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT),
+        "pointer swapchains failed");
+    using Result=StereoRenderer::Result;using Eye=StereoRenderer::EyeResult;
+    StereoRenderer renderer(session,chains);
+    CompositionLayers composition(pointer_chains);
+    XrCompositionLayerQuad quad_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    const auto* quad=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad_layer);
+    bool pointer=true,show_quad=true;unsigned quad_draws=0;
+    std::vector<unsigned> pointer_draws;std::optional<unsigned> pending_eye,failed_eye;
+    const auto draw=[](unsigned,uint32_t,const EyeCamera&,XrTime) {return Eye::complete;};
+    const StereoRenderer::Composition layers{
+        [&](const StereoFrame& frame,std::vector<const XrCompositionLayerBaseHeader*>& out) {
+            return composition.draw(frame,session.space(),pointer,[&](const StereoFrame&,const XrCompositionLayerBaseHeader*& layer) {
+                ++quad_draws;if(show_quad) layer=quad;return Eye::complete;
+            },[&](unsigned eye,uint32_t image,XrTime time) {
+                require(image==1 && time==123456,"pointer eye arguments changed");
+                pointer_draws.push_back(eye);
+                if(failed_eye==eye) return Eye::failed;
+                if(pending_eye==eye) {pending_eye.reset();return Eye::pending;}
+                return Eye::complete;
+            },out);
+        },[&] {return composition.cancel([] {return ImageWait::ready;});}};
+    const auto projection=[&] {return reinterpret_cast<const XrCompositionLayerBaseHeader*>(chains.projection());};
+    const auto pointer_projection=[&] {return reinterpret_cast<const XrCompositionLayerBaseHeader*>(pointer_chains.projection());};
+    // A pending pointer fence retries without drawing or acquiring the quad again.
+    pending_eye=0;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,layers)==Result::waiting && quad_draws==1,"pending pointer eye not retried");
+    require(renderer.step_async(draw,1,.1F,std::nullopt,layers)==Result::submitted && quad_draws==1,"pointer frame not submitted");
+    require(pointer_draws==std::vector<unsigned>({0,0,1}) && released==4,"pointer eyes not drawn and released once each");
+    require(fake.layers==std::vector<const XrCompositionLayerBaseHeader*>({projection(),quad,pointer_projection()}),
+        "pointer layer not submitted last");
+    const auto& submitted=*pointer_chains.projection();
+    require(submitted.layerFlags==XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT && chains.projection()->layerFlags==0,
+        "pointer layer not alpha blended, or the eye layer changed");
+    require(submitted.space==chains.projection()->space && submitted.viewCount==2
+        && submitted.views[1].subImage.imageRect.extent.width==50,"pointer layer space or images wrong");
+    for(unsigned eye=0;eye<2;++eye)
+        require(std::memcmp(&submitted.views[eye].pose,&chains.projection()->views[eye].pose,sizeof(XrPosef))==0
+            && std::memcmp(&submitted.views[eye].fov,&chains.projection()->views[eye].fov,sizeof(XrFovf))==0,
+            "pointer layer does not share the eye views");
+    // Inactive: exactly the old layers, and the pointer swapchain is untouched.
+    pointer=false;pointer_draws.clear();const auto before=acquisitions;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,layers)==Result::submitted && pointer_draws.empty()
+        && acquisitions==before+2,"inactive pointer still drew or acquired");
+    require(fake.layers==std::vector<const XrCompositionLayerBaseHeader*>({projection(),quad}),"inactive frame layers changed");
+    pointer=true;show_quad=false;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,layers)==Result::submitted
+        && fake.layers==std::vector<const XrCompositionLayerBaseHeader*>({projection(),pointer_projection()}),
+        "pointer without a quad not submitted after the eyes");
+    // A failed pointer eye cancels the frame and returns every image.
+    failed_eye=1;const auto released_before=released;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,layers)==Result::error && fake.submitted==0
+        && released==released_before+4,"failed pointer frame leaked an image or submitted");
+    failed_eye.reset();pointer_draws.clear();
+    require(renderer.step_async(draw,1,.1F,std::nullopt,layers)==Result::submitted && pointer_draws==std::vector<unsigned>({0,1})
+        && fake.layers.size()==2,"pointer did not recover after cancel");
+}
 }
 int main() try {
     forced_frames();
-    forced_renderer();overlap_renderer();acquisitions=released=0;
+    forced_renderer();overlap_renderer();pointer_layer();acquisitions=released=0;
     fake=Fake{};
     {
         OpenXrSession s(api());start(s);

@@ -115,4 +115,43 @@ std::optional<StereoRenderer::Result> StereoRenderer::overlap_eyes(const AsyncDr
     }
     return std::nullopt;
 }
+CompositionLayers::EyeResult CompositionLayers::draw(const StereoFrame& frame,XrSpace space,bool pointer,
+    const Quad& quad,const PointerEye& eye,std::vector<const XrCompositionLayerBaseHeader*>& layers) {
+    auto& p=progress_;
+    if(!p.started) {p.started=true;p.pointer=pointer;}
+    if(!p.quad_done) {
+        const XrCompositionLayerBaseHeader* layer{};
+        const auto result=quad?quad(frame,layer):EyeResult::complete;
+        if(result!=EyeResult::complete) return result;
+        p.quad=layer;p.quad_done=true;
+    }
+    if(p.quad) layers.push_back(p.quad);
+    if(p.pointer) {
+        if(!p.pointer_started) {
+            if(!pointer_.start_frame(frame,space)) return EyeResult::failed;
+            p.pointer_started=true;
+        }
+        for(;p.pointer_eye<2;++p.pointer_eye) {
+            const auto ready=pointer_.acquire_eye(p.pointer_eye);
+            if(ready==ImageWait::waiting) return EyeResult::pending;
+            if(ready==ImageWait::error || !eye) return EyeResult::failed;
+            const auto result=eye(p.pointer_eye,*pointer_.image_index(p.pointer_eye),frame.display_time);
+            if(result==EyeResult::submitted) return EyeResult::pending;
+            if(result!=EyeResult::complete) return result;
+            if(!pointer_.release_eye(p.pointer_eye)) return EyeResult::failed;
+        }
+        const auto* projection=pointer_.projection();
+        if(!projection) return EyeResult::failed;
+        layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(projection));
+    }
+    p={};return EyeResult::complete;
+}
+ImageWait CompositionLayers::cancel(const std::function<ImageWait()>& quad) {
+    progress_={};
+    // Both always run: an idle pointer swapchain holds nothing and returns ready.
+    const auto a=quad?quad():ImageWait::ready;
+    const auto b=pointer_.cancel_frame();
+    if(a==ImageWait::error || b==ImageWait::error) return ImageWait::error;
+    return a==ImageWait::waiting || b==ImageWait::waiting?ImageWait::waiting:ImageWait::ready;
+}
 }

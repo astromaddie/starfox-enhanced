@@ -69,4 +69,25 @@ private:
     bool recenter_pending_{},recenter_height_pending_{};float head_translation_{1.F},diag_yaw_{};
     PositionAnchor position_anchor_;
 };
+// Composition after both eyes: the optional UI quad, then the pause pointer's
+// own alpha-blended projection layer, last so no panel or quad can cover it.
+// Pending retries keep progress, so a released image is never acquired again
+// in the same frame. Whether the pointer shows is latched on the first call.
+class CompositionLayers {
+public:
+    using EyeResult=StereoRenderer::EyeResult;
+    using Quad=std::function<EyeResult(const StereoFrame&,const XrCompositionLayerBaseHeader*&)>;
+    using PointerEye=std::function<EyeResult(unsigned eye,uint32_t image,XrTime)>;
+    explicit CompositionLayers(OpenXrSwapchains& pointer):pointer_(pointer) {}
+    EyeResult draw(const StereoFrame&,XrSpace,bool pointer,const Quad&,const PointerEye&,
+        std::vector<const XrCompositionLayerBaseHeader*>&);
+    ImageWait cancel(const std::function<ImageWait()>& quad);
+private:
+    OpenXrSwapchains& pointer_;
+    struct Progress {
+        bool started{},quad_done{},pointer{},pointer_started{};
+        unsigned pointer_eye{};
+        const XrCompositionLayerBaseHeader* quad{};
+    } progress_;
+};
 }

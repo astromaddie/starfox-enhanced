@@ -291,6 +291,25 @@ int main() try {
         vr::PauseSandbox sandbox;sandbox.begin(packets,snapshot);
         XrPosef pose{};pose.orientation.w=1;
         std::array<std::optional<XrPosef>,2> hands{pose,std::nullopt};
+        {
+            // The beam runs from the aim pose to the hit, with an opaque
+            // eye-facing end dot there: the pointer layer's alpha is its alpha.
+            vr::PauseSandbox probe;probe.begin(packets,snapshot);
+            XrPosef away=pose;away.orientation={0,1,0,0};
+            const auto pointer=probe.update({pose,away},{false,false});
+            const auto& lines=pointer.geometry.line_vertices;const auto& dots=pointer.geometry.vertices;
+            require(lines.size()==4 && dots.size()==12);
+            require(lines[0].position[0]==0 && lines[0].position[1]==0 && lines[0].position[2]==0);
+            require(std::abs(lines[1].position[2]+2.235F)<.002F && std::abs(lines[1].position[0])<1e-6F);
+            require(std::abs(lines[3].position[2]-128)<.001F); // A miss still ends 128 m out.
+            for(unsigned i=0;i<12;++i) {
+                const auto& dot=dots[i];const auto& end=lines[i<6?1:3];
+                require(std::equal(dot.position,dot.position+3,end.position) && dot.texture[3]==vr::PauseSandbox::end_dot_flags);
+                require(dot.color[3]==1 && end.color[3]==1 && std::abs(dot.uv[0])==1 && std::abs(dot.uv[1])==1);
+                require(std::abs(std::abs(dot.billboard[0])-(i<6?.01788F:1.024F))<.0001F);
+            }
+            require(!probe.update({std::nullopt,std::nullopt},{false,false}).geometry.vertices.size());
+        }
         sandbox.update(hands,{true,false}); // Held while entering pause must not grab.
         hands[0]->position.x=1;sandbox.update(hands,{true,false});
         auto unchanged=packets;sandbox.apply(unchanged);require(unchanged.packets[0].model==packet.model);

@@ -19,8 +19,9 @@ public:
     OpenXrSwapchains& operator=(const OpenXrSwapchains&)=delete;
     // Session/device outlive this object. Caller must finish GPU work before
     // close/destruction. Preference values use the selected graphics API.
+    // Layer flags let a second, alpha-blended projection sit over earlier layers.
     bool initialize(XrSession,std::span<const XrViewConfigurationView>,
-        std::span<const int64_t> preferred_formats);
+        std::span<const int64_t> preferred_formats,XrCompositionLayerFlags layer_flags=0);
     void close() noexcept;
     bool start_frame(const StereoFrame&,XrSpace);
     // Timeout preserves the acquired image; retry waits rather than acquiring
