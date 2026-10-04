@@ -1440,3 +1440,21 @@ outside the eye work, most likely queueing behind the SteamVR compositor, which
 overlap cannot remove. The heavier stretch of Corneria (windows 5–7) still drops
 to 55–77 fps at 75%. Holding 90 Hz there needs either less GPU work per pixel
 (shader cost) or about 65–70% resolution. Overlap stays opt-in.
+
+## Wear result (October 4)
+
+The user wore the Frame build `b7b89bf`, as relayed by the "VR game testing and
+feedback" session: cockpit mode at a 90 fps target, default settings (overlap
+off, RENDER RESOLUTION 100%).
+- The opening "Nintendo presents" credits text is now stable when the head
+  tilts (b7bcd63): accepted.
+- 3D looks good, and the station-scramble cutscene "looks amazing".
+- Scale looks right: the cutscene Arwing at 24x, the canopy seat, the rear
+  bulkhead and the roll hoop (ddee4ff, 1d68555).
+- Verdict: "this feels great". No issues reported.
+
+Status: played in headset and accepted, for the 24x cockpit scale with the
+cutscene hull and canopy seat, cockpit motion smoothing and the Follow ease,
+and the opening credits. Still open: worn frame-time numbers ([vr-perf]
+while worn), the RENDER RESOLUTION and REFRESH RATE settings in the headset, and
+the opt-in overlap mode.
