@@ -1,5 +1,5 @@
 // Column-major world-to-eye and Vulkan eye projection, matching EyeCamera.
-struct Camera { float4 view_rows[3]; column_major float4x4 projection; uint4 effects; };
+struct Camera { float4 view_rows[3]; column_major float4x4 projection; uint4 effects; float4 billboard_up; };
 [[vk::push_constant]] ConstantBuffer<Camera> camera;
 float4x4 view_matrix() {
     return float4x4(camera.view_rows[0],camera.view_rows[1],camera.view_rows[2],float4(0,0,0,1));
@@ -100,7 +100,11 @@ Fragment vertex_main(Vertex input) {
         float sx=length(mul(view_matrix(),float4(1,0,0,0)).xyz);
         float sy=length(mul(view_matrix(),float4(0,1,0,0)).xyz);
         if(exploding) {sx/=input.group_c.y;sy/=input.group_c.y;}
-        eye_position.xy+=input.billboard*float2(sx,sy);
+        // Face the eye, but stay upright with the scene: head roll must not turn
+        // billboards. A level head gives up=(0,1), the previous eye-space basis.
+        float2 up=camera.billboard_up.xy;
+        up=length(up)>.0001?normalize(up):float2(0,1);
+        eye_position.xy+=input.billboard.x*sx*float2(up.y,-up.x)+input.billboard.y*sy*up;
     }
     output.position=mul(camera.projection,eye_position);
     // Source coplanar texture decals must survive the backing polygon's depth

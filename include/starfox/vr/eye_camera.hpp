@@ -12,20 +12,27 @@ struct EyeCamera {
     Matrix4 view;
     Matrix4 projection;
     std::array<unsigned,4> effects{};
+    // Eye-space up of the scene before any model transform. Billboards stay
+    // upright with it, so head roll never turns them; set by model_eye_camera.
+    std::optional<std::array<float,3>> billboard_up;
 };
 // Affine view stores three rows; projection remains a full column-major matrix.
-// Leave 16 bytes for per-draw effects within Vulkan's guaranteed 128 bytes.
+// 144 bytes: above Vulkan's guaranteed 128, within the 256 that the Frame's
+// Adreno 750, Quest, lavapipe and desktop GPUs report.
 struct SceneConstants {
     std::array<float,12> view_rows;
     Matrix4 projection;
     std::array<unsigned,4> effects;
+    std::array<float,4> billboard_up;
 };
-static_assert(sizeof(SceneConstants)==128);
+static_assert(sizeof(SceneConstants)==144);
 inline SceneConstants scene_constants(const EyeCamera& camera) noexcept {
     SceneConstants result{};
     for(unsigned row=0;row<3;++row) for(unsigned col=0;col<4;++col)
         result.view_rows[row*4+col]=camera.view[col*4+row];
     result.projection=camera.projection;result.effects=camera.effects;
+    const auto up=camera.billboard_up.value_or(std::array<float,3>{camera.view[4],camera.view[5],camera.view[6]});
+    result.billboard_up={up[0],up[1],up[2],0};
     return result;
 }
 // Capture one stereo midpoint, then retain it: never cancel subsequent head

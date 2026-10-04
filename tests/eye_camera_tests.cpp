@@ -294,6 +294,21 @@ int main() {
             auto invalid=*c;invalid.view[0]*=2;require(!ShadowView::from_eye(invalid));
             require(!ShadowView::from_eye(*c,0));
         }
+        {
+            // Billboards stay upright with the scene: the up passed to the shader is
+            // the camera's, before any model rotation, and a level head is unchanged.
+            EyeCamera level{};level.view={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            auto constants=scene_constants(level);
+            close(constants.billboard_up[0],0);close(constants.billboard_up[1],1);close(constants.billboard_up[3],0);
+            const float roll=.5F;EyeCamera rolled=level;
+            rolled.view={std::cos(roll),std::sin(roll),0,0, -std::sin(roll),std::cos(roll),0,0, 0,0,1,0, 0,0,0,1};
+            const Matrix4 spinning{0,-2,0,0, 2,0,0,0, 0,0,2,0, 3,4,5,1}; // object rotated 90 degrees and scaled
+            const auto combined=model_eye_camera(rolled,spinning);require(combined.has_value());
+            constants=scene_constants(*combined);
+            close(constants.billboard_up[0],-std::sin(roll));close(constants.billboard_up[1],std::cos(roll));
+            const auto chained=model_eye_camera(*combined,spinning);require(chained.has_value());
+            close(scene_constants(*chained).billboard_up[0],-std::sin(roll));
+        }
         std::cout<<"Per-eye shadow projection and moving ground/light transform tests passed (not headset validation)\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

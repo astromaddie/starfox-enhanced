@@ -94,6 +94,7 @@ std::optional<EyeCamera> model_eye_camera(const EyeCamera& camera,const Matrix4&
         for(float value:*matrix) if(!std::isfinite(value)) return {};
     if(model[3]!=0 || model[7]!=0 || model[11]!=0 || model[15]!=1) return {};
     EyeCamera result{};result.projection=camera.projection;result.effects=camera.effects;
+    result.billboard_up=camera.billboard_up.value_or(std::array<float,3>{camera.view[4],camera.view[5],camera.view[6]});
     for(unsigned column=0;column<4;++column) for(unsigned row=0;row<4;++row) {
         double value=0;
         for(unsigned k=0;k<4;++k) value+=double(camera.view[k*4+row])*model[column*4+k];

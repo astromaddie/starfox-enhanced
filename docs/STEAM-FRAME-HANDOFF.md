@@ -1508,3 +1508,23 @@ Star Fox was not running; all package hashes match and nothing was launched.
 headset: pause in a level and point either controller through the pause panel.
 The beam and the end dot should stay visible on top of the panel, the cockpit
 and the HUD. Also check whether vr-session.log contains a pointer-layer fallback line.
+
+## Billboards upright under head roll (October 5)
+
+Cross-port rule (playbook standard §4): reticles and camera-facing billboards
+never roll with the head. Star Fox's eye-space billboards (texture flag 4:
+particles, explosions drawn as simple scaled sprites, grid and dust dots, the
+pointer's end dot) added their corners along the eye's own x/y, so they turned
+with head roll. The scene camera's eye-space up, taken before any model
+transform, now travels in `EyeCamera::billboard_up` (set by `model_eye_camera`)
+and in the push-constant block, which grows from 128 to 144 bytes. The Frame's
+Adreno 750 reports a 256-byte limit, as do Quest, lavapipe and desktop GPUs;
+Vulkan guarantees only 128. The vertex shader keeps each billboard facing the
+eye but rotates its basis so "up" follows the scene's up projected into the eye
+plane. A level head gives exactly the previous basis. The EX aiming stations and
+the scaled credits text already use the game plane.
+
+DXC is now available on this Mac: LunarG Vulkan SDK 1.4.363.0 in `~/VulkanSDK`
+(`~/VulkanSDK/1.4.363.0/macOS/bin/dxc`). Regenerating the unchanged scene shader
+with it gave a byte-identical header before this change. Regenerate with
+`python3 tools/generate_vr_shaders.py --dxc ~/VulkanSDK/1.4.363.0/macOS/bin/dxc`.

@@ -60,7 +60,7 @@ VKAPI_ATTR VkResult VKAPI_CALL create_shader(VkDevice,const VkShaderModuleCreate
 }
 VKAPI_ATTR void VKAPI_CALL destroy_shader(VkDevice,VkShaderModule,const VkAllocationCallbacks*) {++shader_destroys;}
 VKAPI_ATTR VkResult VKAPI_CALL create_layout(VkDevice,const VkPipelineLayoutCreateInfo* info,const VkAllocationCallbacks*,VkPipelineLayout* out) {
-    require(info->pushConstantRangeCount==1 && info->pPushConstantRanges[0].size==128);
+    require(info->pushConstantRangeCount==1 && info->pPushConstantRanges[0].size==sizeof(SceneConstants));
     *out=handle<VkPipelineLayout>(1);return VK_SUCCESS;
 }
 VKAPI_ATTR void VKAPI_CALL destroy_layout(VkDevice,VkPipelineLayout,const VkAllocationCallbacks*) {}
@@ -74,7 +74,7 @@ VKAPI_ATTR VkResult VKAPI_CALL create_pipeline(VkDevice,VkPipelineCache,uint32_t
 VKAPI_ATTR void VKAPI_CALL destroy_pipeline(VkDevice,VkPipeline,const VkAllocationCallbacks*) {}
 VKAPI_ATTR void VKAPI_CALL bind_pipeline(VkCommandBuffer,VkPipelineBindPoint,VkPipeline) {}
 VKAPI_ATTR void VKAPI_CALL bind_vertices(VkCommandBuffer,uint32_t,uint32_t,const VkBuffer*,const VkDeviceSize*) {}
-VKAPI_ATTR void VKAPI_CALL push(VkCommandBuffer,VkPipelineLayout,VkShaderStageFlags,uint32_t,uint32_t size,const void*) {require(size==128);}
+VKAPI_ATTR void VKAPI_CALL push(VkCommandBuffer,VkPipelineLayout,VkShaderStageFlags,uint32_t,uint32_t size,const void*) {require(size==sizeof(SceneConstants));}
 VKAPI_ATTR void VKAPI_CALL viewport(VkCommandBuffer,uint32_t,uint32_t,const VkViewport* view) {require(view->width==100 && view->height==200);}
 VKAPI_ATTR void VKAPI_CALL scissor(VkCommandBuffer,uint32_t,uint32_t,const VkRect2D*) {}
 VKAPI_ATTR void VKAPI_CALL draw_scene(VkCommandBuffer,uint32_t count,uint32_t instances,uint32_t,uint32_t) {require(count==expected_vertex_count && instances==1);++draws;}
