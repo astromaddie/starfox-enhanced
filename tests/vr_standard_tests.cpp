@@ -225,6 +225,13 @@ void diagnostic_env() {
     require(diagnostic_overrides(fake_getenv).exit_after_seconds==1e9F); // Not a registry key: unclamped.
     char name[64];
     require(sfvr_settings_env_name("SFX","exit_after",name,sizeof name) && std::strcmp(name,"SFX_VR_EXIT_AFTER")==0);
+    // SFX_VR_OVERLAP_EYES alone turns the line on; off or junk leaves it off.
+    fake_env.clear();fake_env["SFX_VR_OVERLAP_EYES"]="1";
+    diag=diagnostic_overrides(fake_getenv);
+    require(diag.active() && diag.overlap_eyes && diag.describe()=="[vr] diagnostic overrides: overlap_eyes=1");
+    for(const char* off:{"0","maybe",""}) {
+        fake_env["SFX_VR_OVERLAP_EYES"]=off;require(!diagnostic_overrides(fake_getenv).overlap_eyes);
+    }
     fake_env.clear();
 }
 void autostart_levels() {

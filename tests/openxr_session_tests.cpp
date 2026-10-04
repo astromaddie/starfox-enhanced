@@ -1,9 +1,11 @@
 #include "starfox/vr/openxr_session.hpp"
 #include "starfox/vr/stereo_renderer.hpp"
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <deque>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 using namespace starfox::vr;
@@ -20,6 +22,12 @@ struct Fake {
     XrTime submitted_time{};
     XrTime predicted_time{123456};
 } fake;
+// Renderer event order: 10+eye queued, 20+eye pending poll, 30+eye fence
+// observed, 40+eye failed, 50+eye image released, 60/61 composition draw/cancel, 7 end frame.
+std::vector<int> order;
+std::array<XrSwapchain,2> eye_chains{};
+XrSwapchain waiting_chain{};
+XrDuration image_timeout{};
 XrResult XRAPI_PTR create(XrInstance,const XrSessionCreateInfo* info,XrSession* out) {
     require(info->next!=nullptr && info->systemId==7,"graphics binding/system not forwarded");
     fake.calls.push_back(1);*out=handle<XrSession>(2);return XR_SUCCESS;
@@ -60,7 +68,7 @@ XrResult XRAPI_PTR wait(XrSession,const XrFrameWaitInfo*,XrFrameState* out) {
 }
 XrResult XRAPI_PTR begin_frame(XrSession,const XrFrameBeginInfo*) {fake.calls.push_back(5);return XR_SUCCESS;}
 XrResult XRAPI_PTR end_frame(XrSession,const XrFrameEndInfo* info) {
-    fake.calls.push_back(7);fake.submitted=info->layerCount;fake.submitted_time=info->displayTime;++fake.end_calls;
+    fake.calls.push_back(7);order.push_back(7);fake.submitted=info->layerCount;fake.submitted_time=info->displayTime;++fake.end_calls;
     require(info->environmentBlendMode==XR_ENVIRONMENT_BLEND_MODE_OPAQUE,"preferred opaque blend not selected");
     return fake.refuse_layers && info->layerCount?XR_ERROR_LAYER_INVALID:XR_SUCCESS;
 }
@@ -89,7 +97,7 @@ XrResult XRAPI_PTR formats(XrSession,uint32_t capacity,uint32_t* count,int64_t* 
     *count=1;if(capacity) *out=43;return XR_SUCCESS;
 }
 XrResult XRAPI_PTR swap_create(XrSession,const XrSwapchainCreateInfo*,XrSwapchain* out) {
-    *out=handle<XrSwapchain>(4);return XR_SUCCESS;
+    static uintptr_t next=4;*out=handle<XrSwapchain>(next++);return XR_SUCCESS;
 }
 XrResult XRAPI_PTR swap_destroy(XrSwapchain) {return XR_SUCCESS;}
 XrResult XRAPI_PTR images(XrSwapchain,uint32_t,uint32_t* count,XrSwapchainImageBaseHeader*) {
@@ -98,10 +106,12 @@ XrResult XRAPI_PTR images(XrSwapchain,uint32_t,uint32_t* count,XrSwapchainImageB
 XrResult XRAPI_PTR acquire(XrSwapchain,const XrSwapchainImageAcquireInfo*,uint32_t* index) {
     ++acquisitions;*index=1;return XR_SUCCESS;
 }
-XrResult XRAPI_PTR image_wait(XrSwapchain,const XrSwapchainImageWaitInfo*) {
-    return image_pending?XR_TIMEOUT_EXPIRED:XR_SUCCESS;
+XrResult XRAPI_PTR image_wait(XrSwapchain chain,const XrSwapchainImageWaitInfo* info) {
+    image_timeout=info->timeout;
+    return image_pending || chain==waiting_chain?XR_TIMEOUT_EXPIRED:XR_SUCCESS;
 }
-XrResult XRAPI_PTR release(XrSwapchain,const XrSwapchainImageReleaseInfo*) {
+XrResult XRAPI_PTR release(XrSwapchain chain,const XrSwapchainImageReleaseInfo*) {
+    for(unsigned eye=0;eye<2;++eye) if(chain==eye_chains[eye]) order.push_back(50+int(eye));
     ++released;return XR_SUCCESS;
 }
 void forced_frames() {
@@ -174,10 +184,85 @@ void forced_renderer() {
     session.set_force_render(false);
     require(renderer.step(draw,1,.1F)==StereoRenderer::Result::skipped && !renderer.last_frame_forced(),"unforced standby rendered");
 }
+// SFX_VR_OVERLAP_EYES: both eyes queue before either fence is observed;
+// images are released in eye order after their own fence, then end_frame.
+void overlap_renderer() {
+    fake=Fake{};image_pending=false;acquisitions=released=0;
+    OpenXrSession session(api());start(session);
+    OpenXrSwapchains chains({formats,swap_create,swap_destroy,images,acquire,image_wait,release});
+    std::array<XrViewConfigurationView,2> config{};
+    for(auto& eye:config) {
+        eye.recommendedImageRectWidth=eye.recommendedImageRectHeight=100;
+        eye.maxImageRectWidth=eye.maxImageRectHeight=100;eye.maxSwapchainSampleCount=1;
+    }
+    const std::array<int64_t,1> preferred{43};
+    require(chains.initialize(session.handle(),config,preferred),"overlap swapchains failed");
+    eye_chains={chains.handle(0),chains.handle(1)};
+    using Result=StereoRenderer::Result;using Eye=StereoRenderer::EyeResult;
+    // Fake GPU: an eye's first call queues its work, later calls poll its fence.
+    std::array<bool,2> queued{},fence{};
+    std::optional<unsigned> fail_eye;bool fatal_poll=false;
+    const auto draw=[&](unsigned eye,uint32_t index,const EyeCamera&,XrTime time) {
+        require(index==1 && time==123456,"overlap eye arguments changed");
+        if(!queued[eye]) {
+            if(fail_eye==eye) {order.push_back(40+int(eye));return Eye::failed;}
+            queued[eye]=true;order.push_back(10+int(eye));return Eye::submitted;
+        }
+        if(fatal_poll) return Eye::fatal;
+        if(!fence[eye]) {order.push_back(20+int(eye));return Eye::pending;}
+        queued[eye]=fence[eye]=false;order.push_back(30+int(eye));return Eye::complete;
+    };
+    const StereoRenderer::Composition composition{
+        [&](const StereoFrame&,std::vector<const XrCompositionLayerBaseHeader*>&) {order.push_back(60);return Eye::complete;},
+        [&] {order.push_back(61);return ImageWait::ready;}};
+    StereoRenderer renderer(session,chains);
+    renderer.set_overlap_eyes(true);
+    require(!renderer.overlapping(),"overlap applied before a frame boundary");
+    // Eye 1's image wait is bounded while eye 0 is in flight.
+    order.clear();waiting_chain=eye_chains[1];
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::waiting && renderer.overlapping(),"overlap frame not begun");
+    require(order==std::vector<int>({10}) && image_timeout==1000000,"eye 1 image wait not bounded behind eye 0");
+    waiting_chain={};
+    renderer.set_overlap_eyes(false); // Latched: the frame in progress still overlaps.
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::waiting && released==0,"queued eye released early");
+    require(order==std::vector<int>({10,11,20}),"eye 1 not queued before eye 0's fence");
+    fence[0]=true;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::waiting && released==1,"eye 0 not released after its fence");
+    fence[1]=true;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::submitted && fake.submitted==1,"overlap frame not submitted");
+    require(order==std::vector<int>({10,11,20,30,50,21,31,51,60,7}),"overlap fence, release or end order wrong");
+    // Serial again from the next frame: a queued eye is only pending, and eye 1
+    // is not drawn until eye 0's fence is observed and its image released.
+    order.clear();fence={true,true};
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::waiting && !renderer.overlapping(),"serial frame changed");
+    require(image_timeout==0 && order==std::vector<int>({10}),"serial frame treated submitted as complete");
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::waiting,"serial eye 1 not pending");
+    fence[1]=true;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::submitted,"serial frame not submitted");
+    require(order==std::vector<int>({10,30,50,11,31,51,60,7}),"serial order changed");
+    // Eye 1 fails while eye 0 is in flight: eye 0's fence is drained before
+    // cancel returns both images, and no layer is submitted.
+    renderer.set_overlap_eyes(true);order.clear();fail_eye=1;
+    const auto before=released;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::waiting && released==before,"cancel released an image in flight");
+    fence[0]=true;
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::error && released==before+2 && fake.submitted==0,
+        "failed overlap frame leaked an image or submitted");
+    require(order==std::vector<int>({10,41,20,30,61,50,51,7}) && !queued[0] && !renderer.frame_pending(),"overlap cancel order wrong");
+    fail_eye.reset();fence={true,true};
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::submitted,"overlap did not recover after cancel");
+    // An uncertain fence keeps both images for device teardown.
+    order.clear();fatal_poll=true;fence={};
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::error && renderer.teardown_required(),
+        "fatal overlap poll did not require teardown");
+    require(order==std::vector<int>({10,11}),"fatal overlap frame released or ended");
+    require(renderer.step_async(draw,1,.1F,std::nullopt,composition)==Result::error && order.size()==2,"fatal overlap frame reused");
+    eye_chains={};
+}
 }
 int main() try {
     forced_frames();
-    forced_renderer();acquisitions=released=0;
+    forced_renderer();overlap_renderer();acquisitions=released=0;
     fake=Fake{};
     {
         OpenXrSession s(api());start(s);

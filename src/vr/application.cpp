@@ -694,6 +694,14 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     if(!commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) {
         std::cerr<<commands.status()<<'\n';return 8;
     }
+    const auto diagnostics=starfox::vr::diagnostic_overrides();
+    // SFX_VR_OVERLAP_EYES: eye 1 gets its own buffer, fence and query pool so
+    // it can queue behind eye 0 before eye 0's fence. device.queue() is the
+    // graphics binding's queue (queueIndex 0 of its family), as OpenXR requires.
+    starfox::vr::VulkanEyeCommands right_commands;
+    if(diagnostics.overlap_eyes && !right_commands.initialize(device.binding().device,device.queue(),
+        device.binding().queueFamilyIndex,get_device,timestamp_config)) {std::cerr<<right_commands.status()<<'\n';return 8;}
+    auto& right_eye_commands=diagnostics.overlap_eyes?right_commands:commands;
     starfox::vr::VulkanEyeCommands ui_commands;
     if(!ui_commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) return 8;
     if(profile_csv.enabled()) {
@@ -720,7 +728,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         metadata("queue_timestamp_valid_bits",std::to_string(device.timestamp_valid_bits()));
         metadata("queue_timestamp_period_ns",std::to_string(device.timestamp_period_ns()));
         metadata("left_eye_timestamp_capability",commands.timestamp_status());
-        metadata("right_eye_timestamp_capability",commands.timestamp_status());
+        metadata("right_eye_timestamp_capability",right_eye_commands.timestamp_status());
         metadata("ui_timestamp_capability",ui_commands.timestamp_status());
         metadata("gpu_duration_definition","Vulkan top-of-pipe to bottom-of-pipe queue timestamps; unavailable values are empty");
         metadata("cpu_fence_definition","CPU submit-to-fence-observation elapsed time; not GPU time");
@@ -737,8 +745,11 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::WorldPanelAnchor ui_anchor;
     bool ui_was_visible=false;
     unsigned recenter_revision=0;
-    starfox::vr::VulkanStereoDraw draw(commands,targets);
+    starfox::vr::VulkanStereoDraw draw(commands,targets,diagnostics.overlap_eyes?&right_commands:nullptr);
     starfox::vr::StereoRenderer renderer(session,swapchains,render_game);
+    renderer.set_overlap_eyes(diagnostics.overlap_eyes);
+    bool overlap_frame=false;
+    double overlap_span_sum=0;unsigned overlap_span_frames=0;
     const auto started=std::chrono::steady_clock::now();
     unsigned submitted=0;
     std::optional<XrTime> input_time;unsigned menu_presses=0;
@@ -770,7 +781,6 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     startup.refresh_override=starfox::vr::env_override_float("refresh_rate");
     startup.resolution_override=resolution_override;startup.active_resolution=resolution_scale;
     if(startup.haptics_override) std::cout<<"[vr] haptics strength overridden by SFX_VR_HAPTICS: "<<*startup.haptics_override<<'\n';
-    const auto diagnostics=starfox::vr::diagnostic_overrides();
     session.set_force_render(diagnostics.force_render);
     renderer.set_diag_yaw(diagnostics.yaw_degrees*std::numbers::pi_v<float>/180);
     unsigned forced_rejections_logged=0;
@@ -902,6 +912,11 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         renderer.set_head_translation(startup.presentation.translation_scale());
         const auto result=renderer.step_async([&](unsigned eye,uint32_t image,const auto& tracking_camera,XrTime time) {
             if(!input_time || time!=*input_time) {
+                // Every eye and UI fence was observed before the last frame
+                // ended, overlap included, so nothing below races GPU reads.
+                if(draw.pending() || ui_draw.pending()) {
+                    game_error="Eye work still in flight at a new frame";return starfox::vr::StereoRenderer::EyeResult::fatal;
+                }
                 cpu_frame_profile={};eye_frame_profile={};ui_frame_profile.reset();
                 // Both eyes share the preview; restore the real session only
                 // at the next frame boundary, before processing menu input.
@@ -1554,7 +1569,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             auto camera=tracking_camera;
             camera.view=multiply_matrix(tracking_camera.view,presentation_transform);
             bool ray_ready=false;
-            if(startup.ray_tracing_enabled() && ray_environment_valid && render_game && compute_scene_active && (!startup.open || startup.preview) && eye<2) {
+            // Fixed by the per-frame block above for both eyes. Ray frames stay
+            // serial: eye 1's ray producer reruns the shared compute pre-pass.
+            const bool ray_frame=startup.ray_tracing_enabled() && ray_environment_valid && render_game
+                && compute_scene_active && (!startup.open || startup.preview);
+            overlap_frame=renderer.overlapping() && !ray_frame;
+            if(ray_frame && eye<2) {
                 if(!ray_times[eye] || *ray_times[eye]!=time) {
                     ray_times[eye]=time;
                     // Topology and source alpha materials are shared by both eyes.
@@ -1677,7 +1697,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     throw std::runtime_error("Live model compute recording failed");
             },[&](VkCommandBuffer command,VkExtent2D,const auto&,XrTime) {
                 if(ray_ready && !ray_frames[eye]->record_release(command)) throw std::runtime_error("Ray shadow release failed");
-            },ray_ready?&ray_wait:nullptr);
+            },ray_ready?&ray_wait:nullptr,overlap_frame);
             if(eye_result==StereoRenderer::EyeResult::complete && eye<eye_frame_profile.size())
                 eye_frame_profile[eye]=draw.take_last_eye_timing();
             if(eye_result==StereoRenderer::EyeResult::complete && eye<2 && ray_frames[eye]
@@ -1744,7 +1764,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             forced_rejections_logged=session.forced_rejections();
         }
         if(result==Result::error) {
-            std::cerr<<"Eye rendering failed: "<<commands.status()<<"; "<<session.status()<<"; "<<swapchains.status()<<"; "<<input.status()<<"; "<<game_error<<'\n';return 8;
+            std::cerr<<"Eye rendering failed: "<<commands.status()<<"; "
+                <<(diagnostics.overlap_eyes?right_commands.status()+"; ":std::string())<<session.status()<<"; "<<swapchains.status()<<"; "<<input.status()<<"; "<<game_error<<'\n';return 8;
         }
         if(result==Result::submitted) {
             ++submitted;
@@ -1765,6 +1786,13 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(const auto gpu=eye_frame_profile[eye_index]->gpu_timestamp_ms) {gpu_eye_sum[eye_index]+=*gpu;++gpu_eye_frames[eye_index];}
                     if(const auto pre=eye_frame_profile[eye_index]->pre_pass_gpu_ms) {pre_pass_sum+=*pre;++pre_pass_frames;}
                 }
+                // Overlap: eye 0 submit to eye 1 fence, the CPU wait both eyes
+                // cost together (serial frames are about eye0+eye1).
+                if(overlap_frame && eye_frame_profile[0] && eye_frame_profile[1]) {
+                    overlap_span_sum+=std::chrono::duration<double,std::milli>(
+                        eye_frame_profile[1]->completed_at-eye_frame_profile[0]->submitted_at).count();
+                    ++overlap_span_frames;
+                }
                 perf_log.add_frame(now_s,frame);
                 perf_window_forced|=renderer.last_frame_forced();
                 if(const auto fallback=refresh_rate.observe(now_s,session.state()==XR_SESSION_STATE_FOCUSED)) {
@@ -1780,7 +1808,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(gpu_eye_frames[0] && gpu_eye_frames[1]) rate<<std::fixed<<std::setprecision(2)
                         <<" gpu_eyes="<<gpu_eye_sum[0]/gpu_eye_frames[0]<<'/'<<gpu_eye_sum[1]/gpu_eye_frames[1]<<"ms";
                     if(pre_pass_frames) rate<<" pre="<<pre_pass_sum/pre_pass_frames<<"ms";
+                    if(overlap_span_frames) rate<<std::fixed<<std::setprecision(2)
+                        <<" span="<<overlap_span_sum/overlap_span_frames<<"ms";
                     gpu_eye_sum={};gpu_eye_frames={};pre_pass_sum=0;pre_pass_frames=0;
+                    overlap_span_sum=0;overlap_span_frames=0;
                     if(perf_window_forced) rate<<" forced=1";
                     perf_window_forced=false;
                     session_log(*line+rate.str());

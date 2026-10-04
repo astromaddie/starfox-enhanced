@@ -54,19 +54,22 @@ inline std::optional<bool> env_override_bool(const char* key,
 // unfocused; diag_yaw (SFX_VR_DIAG_YAW, degrees about +Y, -360..360) turns the
 // rendered head; autostart (SFX_VR_AUTOSTART, e.g. LEVEL1_1) skips the startup
 // menu; exit_after (SFX_VR_EXIT_AFTER, seconds in game, not a registry key)
-// quits through QUIT TO STEAM. Unset or unparseable leaves each one off.
+// quits through QUIT TO STEAM; overlap_eyes (SFX_VR_OVERLAP_EYES, 0/1, not a
+// registry key) submits eye 1 without waiting for eye 0's fence. Unset or
+// unparseable leaves each one off.
 struct DiagnosticOverrides {
-    bool force_render{};
+    bool force_render{},overlap_eyes{};
     float yaw_degrees{};
     std::optional<std::string> autostart;
     std::optional<float> exit_after_seconds;
-    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds;}
+    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes;}
     std::string describe() const {
         std::ostringstream line;line<<"[vr] diagnostic overrides:";
         if(force_render) line<<" force_render=1";
         if(yaw_degrees!=0) line<<" diag_yaw="<<yaw_degrees;
         if(autostart) line<<" autostart="<<*autostart;
         if(exit_after_seconds) line<<" exit_after="<<*exit_after_seconds<<'s';
+        if(overlap_eyes) line<<" overlap_eyes=1";
         return line.str();
     }
 };
@@ -77,6 +80,7 @@ inline DiagnosticOverrides diagnostic_overrides(EnvGetter getter=process_getenv)
     result.autostart=env_override_text("autostart",getter);
     if(const auto seconds=env_override_float("exit_after",getter); seconds && *seconds>0)
         result.exit_after_seconds=seconds;
+    result.overlap_eyes=env_override_bool("overlap_eyes",getter).value_or(false);
     return result;
 }
 }

@@ -16,6 +16,7 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
         frame_=session_.begin_frame();
         if(!frame_) return Result::error;
         next_eye_=0;cancelling_=false;display_period_=frame_->display_period;forced_=frame_->forced;
+        overlap_=overlap_requested_;next_retired_=0;in_flight_={};
         if(frame_->tracking_origin_changed || recenter_pending_) {
             const bool keep_height=recenter_pending_ && !recenter_height_pending_
                 && !frame_->tracking_origin_changed;
@@ -38,7 +39,9 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
         }
         if(!images_.start_frame(*frame_,session_.space())) cancelling_=true;
     }
-    while(!cancelling_ && next_eye_<2) {
+    if(overlap_) {
+        if(const auto result=overlap_eyes(draw)) return *result;
+    } else while(!cancelling_ && next_eye_<2) {
         const auto ready=images_.acquire_eye(next_eye_);
         if(ready==ImageWait::waiting) return Result::waiting;
         if(ready==ImageWait::error) {cancelling_=true;break;}
@@ -48,7 +51,7 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
                 cameras_[next_eye_],frame_->display_time);
         } catch(...) {rendered=EyeResult::fatal;}
         if(rendered==EyeResult::fatal) {fatal_=true;return Result::error;}
-        if(rendered==EyeResult::pending) return Result::waiting;
+        if(rendered==EyeResult::pending || rendered==EyeResult::submitted) return Result::waiting;
         if(rendered==EyeResult::failed || !images_.release_eye(next_eye_)) {cancelling_=true;break;}
         ++next_eye_;
     }
@@ -80,5 +83,36 @@ StereoRenderer::Result StereoRenderer::step_async(const AsyncDrawEye& draw,
     layers.insert(layers.end(),extra_layers.begin(),extra_layers.end());
     frame_.reset();
     return session_.end_frame(layers)?Result::submitted:Result::error;
+}
+std::optional<StereoRenderer::Result> StereoRenderer::overlap_eyes(const AsyncDrawEye& draw) {
+    const auto call=[&](unsigned eye) {
+        try {return draw?draw(eye,*images_.image_index(eye),cameras_[eye],frame_->display_time):EyeResult::failed;}
+        catch(...) {return EyeResult::fatal;}
+    };
+    while(!cancelling_ && next_eye_<2) {
+        // Bounded image wait while eye 0 is in flight: the caller adds no pause then.
+        const auto ready=images_.acquire_eye(next_eye_,next_eye_==1 && in_flight_[0]?1000000:0);
+        if(ready==ImageWait::waiting) return Result::waiting;
+        if(ready==ImageWait::error) {cancelling_=true;break;}
+        const auto rendered=call(next_eye_);
+        if(rendered==EyeResult::fatal) {fatal_=true;return Result::error;}
+        if(rendered==EyeResult::pending) return Result::waiting;
+        if(rendered==EyeResult::failed) {cancelling_=true;break;}
+        in_flight_[next_eye_++]=rendered==EyeResult::submitted;
+    }
+    // Observe fences and release in eye order. A cancelled frame still drains
+    // its submitted eyes, so cancel_frame never returns an image in GPU use.
+    while(next_retired_<next_eye_) {
+        if(in_flight_[next_retired_]) {
+            const auto rendered=call(next_retired_);
+            if(rendered==EyeResult::fatal) {fatal_=true;return Result::error;}
+            if(rendered==EyeResult::pending || rendered==EyeResult::submitted) return Result::waiting;
+            in_flight_[next_retired_]=false;
+            if(rendered==EyeResult::failed) cancelling_=true;
+        }
+        if(!cancelling_ && !images_.release_eye(next_retired_)) cancelling_=true;
+        ++next_retired_;
+    }
+    return std::nullopt;
 }
 }

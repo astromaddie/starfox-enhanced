@@ -944,6 +944,7 @@ range. An override wins over the saved preference and is never written to
 | `SFX_VR_DIAG_YAW` | Degrees (-360..360) to turn the rendered head about +Y, positive to the left, for stereo checks at 0/90/180°. Default 0. Added October 4 |
 | `SFX_VR_AUTOSTART` | A level name such as `LEVEL1_1` (any case): skips the startup menu and starts that level as the level-select cheat would. An unknown name is logged and the menu shows. Not a registry key. Added October 4 |
 | `SFX_VR_EXIT_AFTER` | Seconds after the first in-game frame; then quits through the QUIT TO STEAM path. Not a registry key. Added October 4 |
+| `SFX_VR_OVERLAP_EYES` | `1` submits eye 1 straight after eye 0 instead of waiting for eye 0's fence (see "Overlapped eye submission" below). Default off, which keeps the serial eye loop. Not a registry key. Added October 4 |
 
 No other registry key is implemented by this port, so no other variable has any
 effect.
@@ -1362,3 +1363,59 @@ now recommended 2016x2016 eye buffers, not the 2160x2160 seen overnight.
   90 Hz at full resolution stays GPU-bound. At 75–80% the GPU fits, and removing
   the serial wait (submitting eye 1 without waiting for eye 0's fence) is the next
   fix. The compute-barrier batching is not worth doing.
+
+### Overlapped eye submission (October 4)
+
+Untested on the device. Covered by the host build and injected-fake unit tests only.
+
+`SFX_VR_OVERLAP_EYES=1` stops the eyes waiting on each other. Eye 1 gets its own
+`VulkanEyeCommands` (command pool, buffer, fence and timestamp query pool), so a
+frame goes: acquire eye 0, record and submit it, acquire eye 1, record and submit
+it, then wait for eye 0's fence and release its image, wait for eye 1's fence and
+release its image, then the UI panel and `xrEndFrame`. The two submissions sit on
+the queue back to back. With the variable unset there's one command object and the
+old acquire-submit-wait-release loop runs as before. The mode shows in the
+`[vr] diagnostic overrides` line as `overlap_eyes=1`.
+
+- Each image is still released only after its own fence, in eye order. OpenXR would
+  allow releasing right after submission, since `device.queue()` is the graphics
+  binding's queue (queueIndex 0 of its family), but the frame waits for both fences
+  before `xrEndFrame` anyway, so releasing early gains nothing. It also keeps the
+  rule that no image goes back while its fence is uncertain.
+- Both fences are observed before the UI panel and `xrEndFrame`, so the next frame's
+  per-frame block (game tick, scene, sprite, HUD and background uploads, model
+  updates, compute inputs) never starts with eye work in flight, same as before. The
+  block now checks this and stops with "Eye work still in flight at a new frame" if
+  it ever happens.
+- Nothing shared is written between eye 0's submit and eye 1's recording. Eye 1's
+  callback skips the per-frame block (same display time) and its recording only
+  binds buffers and pushes constants. The compute pre-pass is still recorded in eye
+  0 only, and the barriers that make its output visible to eye 0's draws also cover
+  eye 1, because a barrier's second scope includes later submissions on the same
+  queue. Each eye has its own colour and depth images.
+- If eye 1 fails while eye 0 is in flight, the renderer waits for eye 0's fence
+  before returning both images and ending the frame with no layers. A fence error
+  still keeps both images for device teardown, and teardown waits for the queue to
+  go idle if either eye is pending.
+- Frames with ray-traced shadows stay serial, because eye 1's ray producer reruns
+  the shared compute pre-pass. Ray tracing is off by default and not available on
+  the Frame. The UI panel was already its own submission after both eyes and is
+  unchanged.
+
+Timing in this mode:
+
+- `eye=a/b` is still each eye's CPU submit-to-fence time, but it reads differently.
+  Eye 0's includes recording eye 1, because its fence is only checked after that.
+  Eye 1's includes queueing behind eye 0. Don't add them up.
+- `gpu_eyes` is still each command buffer's own top-to-bottom timestamp span. The
+  two spans can overlap on the GPU, so their sum (and `gpu=`) can overstate it.
+- `span=<ms>`, only in this mode, is eye 0's submit to eye 1's fence, averaged over
+  the window: the CPU wait both eyes cost together. The serial equivalent is about
+  eye0 + eye1.
+- `--profile-csv` columns are unchanged and carry the same meanings.
+
+To check on the device, run the 75% LEVEL1_1 forced capture with and without
+`SFX_VR_OVERLAP_EYES=1` and compare fps, missed and `span` against the serial `eye`
+sum. If it helps but isn't enough, the next step is calling `xrEndFrame` before the
+fences and waiting at the start of the next frame's per-frame block instead, so the
+game tick and uploads overlap the GPU too.

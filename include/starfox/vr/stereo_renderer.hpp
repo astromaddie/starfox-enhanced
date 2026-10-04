@@ -11,9 +11,12 @@ namespace starfox::vr {
 class StereoRenderer {
 public:
     using DrawEye = std::function<bool(unsigned, uint32_t, const EyeCamera&, XrTime)>;
-    enum class EyeResult {complete, pending, failed, fatal};
-    // Pending callbacks are retried with the same image/camera/time. Failed
-    // means no GPU work remains; fatal retains images until device teardown.
+    enum class EyeResult {complete, pending, submitted, failed, fatal};
+    // Pending callbacks are retried with the same image/camera/time. Submitted
+    // means the eye's work is queued on the graphics-binding queue but its
+    // fence is not yet observed: an overlapping frame moves on to the next eye
+    // and later retries it like pending; a serial frame treats it as pending.
+    // Failed means no GPU work remains; fatal retains images until device teardown.
     using AsyncDrawEye = std::function<EyeResult(unsigned,uint32_t,const EyeCamera&,XrTime)>;
     struct Composition {
         // Called after both eye fences finish. Pending retains this stereo
@@ -31,6 +34,12 @@ public:
     // SFX_VR_DIAG_YAW: turns the scene cameras only; the submitted layer keeps
     // the real pose, so the compositor shows the turned view straight ahead.
     void set_diag_yaw(float radians) noexcept {diag_yaw_=radians;}
+    // SFX_VR_OVERLAP_EYES, latched at the next frame boundary: submit both
+    // eyes before observing either fence. Images are still released only
+    // after their own fence, in eye order, and before composition and
+    // end_frame, so the next frame never starts with eye work in flight.
+    void set_overlap_eyes(bool on) noexcept {overlap_requested_=on;}
+    bool overlapping() const noexcept {return overlap_;}
     StereoRenderer(OpenXrSession& session, OpenXrSwapchains& images,bool anchor_position=false)
         :session_(session),images_(images),anchor_position_(anchor_position) {}
     enum class Result {idle, waiting, submitted, skipped, error};
@@ -46,12 +55,14 @@ public:
     bool teardown_required() const noexcept {return fatal_;}
     XrPosef anchored_pose(XrPosef pose) const noexcept {return anchor_position_?position_anchor_.anchored(pose):pose;}
 private:
+    std::optional<Result> overlap_eyes(const AsyncDrawEye&);
     OpenXrSession& session_;
     OpenXrSwapchains& images_;
     std::optional<StereoFrame> frame_;
     std::array<EyeCamera,2> cameras_{};
-    unsigned next_eye_{};
-    bool cancelling_{};
+    unsigned next_eye_{},next_retired_{};
+    std::array<bool,2> in_flight_{};
+    bool cancelling_{},overlap_requested_{},overlap_{};
     XrDuration display_period_{};
     bool fatal_{},forced_{};
     bool anchor_position_{};

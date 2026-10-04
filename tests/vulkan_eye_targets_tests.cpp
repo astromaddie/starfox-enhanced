@@ -4,10 +4,12 @@
 #include "starfox/vr/vulkan_scene_pipeline.hpp"
 #include "starfox/vr/vulkan_scene_buffer.hpp"
 #include "starfox/vr/scene_material.hpp"
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <source_location>
+#include <vector>
 using namespace starfox::vr;
 namespace {
 void require(bool value,std::source_location location=std::source_location::current()) {
@@ -17,6 +19,13 @@ template<class T> T handle(uintptr_t value) {return reinterpret_cast<T>(value);}
 unsigned passes{},views{},frames{},destroyed_passes{},destroyed_views{},destroyed_frames{};
 bool fail_frame{};
 bool pending_fence=true;
+// Per-fence state for the two-eye overlap: a blocked fence stays unsignalled.
+std::vector<VkFence> blocked_fences;
+VkFence last_fence{};
+unsigned fence_waits{};
+bool fence_pending(VkFence fence) {
+    return pending_fence || std::find(blocked_fences.begin(),blocked_fences.end(),fence)!=blocked_fences.end();
+}
 bool inside_pass=false;
 unsigned submissions{},idles{},pool_destroys{},fence_destroys{};
 unsigned shader_destroys{},draws{};
@@ -77,7 +86,7 @@ VKAPI_ATTR VkResult VKAPI_CALL allocate(VkDevice,const VkCommandBufferAllocateIn
     require(info->commandBufferCount==1);*out=handle<VkCommandBuffer>(1);return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL create_fence(VkDevice,const VkFenceCreateInfo*,const VkAllocationCallbacks*,VkFence* out) {
-    *out=handle<VkFence>(1);return VK_SUCCESS;
+    static uintptr_t next=1;*out=last_fence=handle<VkFence>(next++);return VK_SUCCESS;
 }
 VKAPI_ATTR void VKAPI_CALL destroy_fence(VkDevice,VkFence,const VkAllocationCallbacks*) {++fence_destroys;}
 VKAPI_ATTR VkResult VKAPI_CALL idle(VkQueue) {++idles;return VK_SUCCESS;}
@@ -100,9 +109,9 @@ VKAPI_ATTR VkResult VKAPI_CALL submit(VkQueue,uint32_t count,const VkSubmitInfo*
     } else require(!info->pNext);
     require(count==1 && info->commandBufferCount==1 && fence);++submissions;return VK_SUCCESS;
 }
-VKAPI_ATTR VkResult VKAPI_CALL fence_status(VkDevice,VkFence) {return pending_fence?VK_NOT_READY:VK_SUCCESS;}
-VKAPI_ATTR VkResult VKAPI_CALL wait_fences(VkDevice,uint32_t,const VkFence*,VkBool32,uint64_t timeout) {
-    require(timeout<=1000000);return pending_fence?VK_TIMEOUT:VK_SUCCESS;
+VKAPI_ATTR VkResult VKAPI_CALL fence_status(VkDevice,VkFence fence) {return fence_pending(fence)?VK_NOT_READY:VK_SUCCESS;}
+VKAPI_ATTR VkResult VKAPI_CALL wait_fences(VkDevice,uint32_t count,const VkFence* fences,VkBool32,uint64_t timeout) {
+    require(timeout<=1000000 && count==1);++fence_waits;return fence_pending(*fences)?VK_TIMEOUT:VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL pass(VkDevice,const VkRenderPassCreateInfo* info,const VkAllocationCallbacks*,VkRenderPass* out) {
     require(info->attachmentCount==1 && info->subpassCount==1);
@@ -267,6 +276,48 @@ int main(int argc,char** argv) try {
         const auto timing=draw.take_completion_timing();
         require(timing.eyes==2 && timing.total_ms>=timing.maximum_ms && timing.maximum_ms>=0);
         require(draw.take_completion_timing().eyes==0);
+    }
+    {
+        // SFX_VR_OVERLAP_EYES: one buffer and fence per eye. Eye 1 is recorded
+        // and queued while eye 0's fence is pending; each eye polls only its own.
+        using Eye=StereoRenderer::EyeResult;
+        pending_fence=false;
+        VulkanEyeCommands left,right;
+        require(left.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get));
+        const auto left_fence=last_fence;
+        require(right.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get));
+        const auto right_fence=last_fence;
+        require(left_fence!=right_fence);
+        VulkanStereoDraw draw(left,targets,&right);
+        EyeCamera camera{};VkClearColorValue clear{};
+        blocked_fences={left_fence,right_fence};
+        const auto prior=submissions,prior_waits=fence_waits;
+        require(draw.draw(0,0,camera,123,clear,{},{},{},nullptr,true)==Eye::submitted && fence_waits==prior_waits && draw.pending());
+        require(draw.draw(1,1,camera,123,clear,{},{},{},nullptr,true)==Eye::submitted && submissions==prior+2);
+        require(draw.draw(1,0,camera,123,clear,{},{},{},nullptr,true)==Eye::fatal); // Another image for a queued eye.
+        require(draw.draw(0,0,camera,123,clear,{},{},{},nullptr,true)==Eye::pending && submissions==prior+2);
+        blocked_fences={right_fence};
+        require(draw.draw(0,0,camera,123,clear,{},{},{},nullptr,true)==Eye::complete);
+        const auto left_timing=draw.take_last_eye_timing();
+        require(left_timing.submit_to_fence_cpu_ms>=0 && left_timing.completed_at>=left_timing.submitted_at);
+        // Eye 1's buffer is not re-recorded until its own fence signals.
+        require(!right.submit_work({1,1},[](VkCommandBuffer,VkExtent2D){}));
+        require(draw.draw(1,1,camera,123,clear,{},{},{},nullptr,true)==Eye::pending && submissions==prior+2 && draw.pending());
+        blocked_fences.clear();
+        require(draw.draw(1,1,camera,123,clear,{},{},{},nullptr,true)==Eye::complete && !draw.pending());
+        require(draw.take_last_eye_timing().submitted_at>=left_timing.submitted_at);
+        const auto timing=draw.take_completion_timing();
+        require(timing.eyes==2 && timing.submissions==2);
+        // The next frame reuses eye 0's buffer once its own fence signalled.
+        require(draw.draw(0,1,camera,124,clear,{},{},{},nullptr,true)==Eye::submitted && submissions==prior+3);
+        require(draw.draw(0,1,camera,124,clear,{},{},{},nullptr,true)==Eye::complete);
+        // Without a second command object the flag is ignored: eyes stay serial.
+        VulkanStereoDraw serial(left,targets);
+        blocked_fences={left_fence};
+        require(serial.draw(0,0,camera,125,clear,{},{},{},nullptr,true)==Eye::pending && fence_waits>prior_waits);
+        require(serial.draw(1,1,camera,125,clear)==Eye::fatal);
+        blocked_fences.clear();
+        require(serial.draw(0,0,camera,125,clear)==Eye::complete);
     }
     {
         VulkanEyeCommands unsupported;
