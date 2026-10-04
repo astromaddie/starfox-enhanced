@@ -1498,3 +1498,13 @@ first pause of each session. Its creation is non-fatal: on any failure the
 session logs `[vr] pointer layer unavailable; drawing the pointer in the eye
 pass: ...`, closes the partial objects, and draws the beam in the eye pass as
 before, rather than ending the game.
+
+### Pointer layer delivery (October 4)
+
+Workflow `37208910890` passed for `a096d16` (pointer on its own top layer, with
+the eye-pass fallback). The package was installed on the Frame over Wi-Fi while
+Star Fox was not running; all package hashes match and nothing was launched.
+`b7b89bf` is kept in `~/devkit-game/_StarFoxEnhanced_prev/`. To check in the
+headset: pause in a level and point either controller through the pause panel.
+The beam and the end dot should stay visible on top of the panel, the cockpit
+and the HUD. Also check whether vr-session.log contains a pointer-layer fallback line.
