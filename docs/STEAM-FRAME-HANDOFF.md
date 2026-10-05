@@ -1528,3 +1528,10 @@ DXC is now available on this Mac: LunarG Vulkan SDK 1.4.363.0 in `~/VulkanSDK`
 (`~/VulkanSDK/1.4.363.0/macOS/bin/dxc`). Regenerating the unchanged scene shader
 with it gave a byte-identical header before this change. Regenerate with
 `python3 tools/generate_vr_shaders.py --dxc ~/VulkanSDK/1.4.363.0/macOS/bin/dxc`.
+Device smoke run (October 5): `212cb89` was installed and run unattended on
+LEVEL1_1 at 90 Hz for 60 s (log `build/frame-devkit/runs/212cb89-forced-LEVEL1_1-smoke.log`).
+It rendered with no Vulkan or shader errors, timings matched `b7b89bf`
+(GPU 11.5–14.9 ms, 45 fps settled at 100%), and it exited cleanly. The
+only matching journal line was SteamVR's existing devkit-title
+"LoadActionManifest failed" notice. The head-roll behaviour itself still needs
+a worn check: tilt your head near explosions and dust.
