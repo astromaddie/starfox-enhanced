@@ -1714,8 +1714,6 @@ cabin and HUD.
 
 ### Hardware-sampled backdrops (October 5)
 
-Untested on the device. The host build and its tests pass.
-
 Photographic backdrops are now sampled from an RGBA8 UNORM image that holds the
 same premultiplied pyramid as the storage buffer, as its mips. A LINEAR/LINEAR/
 LINEAR sampler (U repeat when the artwork wraps, otherwise clamp) uses
@@ -1729,5 +1727,17 @@ first draws them.
 
 `SFX_VR_BACKDROP_SAMPLER=0` keeps the old manual filter for an A/B. On the
 headset, check for seams at the wrap, poles, transparent edges, mip transitions
-and the orbital limb/cap blend. Expect only a few percent of eye time (see the
-Enhanced Sky A/B above).
+and the orbital limb/cap blend. That worn check is still to do.
+
+`54f3494` ran unattended on LEVEL1_1: 120 Hz, 2160² eyes, mask on, Enhanced Sky
+on, two 90 s runs. Logs: `build/frame-devkit/runs/54f3494-forced-LEVEL1_1-sampler{1,0}-mask.log`.
+
+| Backdrop sampler | GPU per frame (both eyes) | Mean of windows 4–8 | fps per 10 s window |
+| --- | --- | --- | --- |
+| on | 9.4–15.5 ms | 13.5 ms | 47–64 |
+| off (old filter) | 12.3–18.1 ms | 16.4 ms | 41–60 |
+
+That's about 18% less GPU time in the busy part of Corneria, up to 26% in one
+window. It's far more than the `sky` segment suggested, so the segment proportions
+understate the sky: they come from one tile. The `off` run matches the earlier
+Enhanced Sky A/B (16.4 ms), so the comparison holds.
