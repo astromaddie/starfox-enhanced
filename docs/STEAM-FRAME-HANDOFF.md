@@ -937,7 +937,7 @@ range. An override wins over the saved preference and is never written to
 | Variable | Meaning |
 | --- | --- |
 | `SFX_VR_HAPTICS` | Haptics strength 0..1 (default from the saved setting, 0.6). The menu row shows `NN% ENV` while it is set, and changing it there has no effect |
-| `SFX_VR_TIMING_GPU` | `1`/`true`/`on` enables GPU timestamp queries, which fills `gpu=` in `[vr-perf]`; default off (also on with `--profile-csv`) |
+| `SFX_VR_TIMING_GPU` | `1`/`true`/`on` enables GPU timestamp queries, which fills `gpu=` in `[vr-perf]`; default off (also on with `--profile-csv`). It also fills `gpu_eyes=` and `pre=`, and since October 5 the per-segment `passes=` (see "Per-pass GPU timing" below); it then shows as `timing_gpu=1` in the diagnostic overrides line. `--profile-csv` alone does not add the segment timestamps |
 | `SFX_VR_REFRESH_RATE` | Target display refresh in Hz, default 90 (added with the refresh-rate request) |
 | `SFX_VR_RESOLUTION_SCALE` | Diagnostic: eye buffers at 0.5–1 of the runtime's recommended size (default 1), to measure how GPU time follows pixel count |
 | `SFX_VR_FORCE_RENDER` | `1` renders and submits every frame even when the runtime says not to (headset off, standby) and runs the game while unfocused, with empty controls. Real views when valid, else a synthetic head at the LOCAL origin (63 mm IPD, ±50° x ±48°). Default off. Added October 4 |
@@ -1559,3 +1559,42 @@ timing off).
   runtime recommendation (2016²) and needs about half its current GPU time per
   frame to hold 120 there. Next step: per-pass GPU profiling, then shader
   optimisation (DXC is now available).
+
+## Per-pass GPU timing (October 5)
+
+Untested on the device. Covered by the host build and injected-fake unit tests only.
+
+With `SFX_VR_TIMING_GPU=1` each eye's command buffer gets five more timestamps
+inside the render pass, so `[vr-perf]` can say where the eye pass spends its time.
+At the end of the line: `passes=sky:a,models:b,sprites:c,cockpit:d` (ms), each
+segment's mean over the 10 s window per eye, summed over both eyes. Existing fields
+are unchanged.
+
+The query pool grows from 3 to 8 entries: 0 command start, 1 command end, 2 end of
+the pre-pass, 3 render pass begun, 4–6 the three marks, 7 end of the eye's draws
+(before `vkCmdEndRenderPass`). All in-pass writes use `BOTTOM_OF_PIPE`.
+
+| Segment | From | To | Draws |
+| --- | --- | --- | --- |
+| sky | pass begun | mark 0 | surrounding stars, backgrounds, tunnel surround, controls stars |
+| models | mark 0 | mark 1 | debug triangle, source scene or packet scene, ray shadow, bomb circle (when under the HUD) |
+| sprites | mark 1 | mark 2 | sandbox pointer (when it falls back to the eye pass), sprites |
+| cockpit | mark 2 | end of draws | cabin, HUD, bomb circle (when over the HUD), scramble shutter |
+
+`pre` keeps its meaning (command start to the end of eye 0's compute pre-pass). The
+clear and the tile store at the end of the pass are outside the four segments, so
+the segments don't add up to `gpu_eyes`. A frame where the eye pass returns early
+(startup menu, world-panel scenes) writes no marks and adds no sample. Without
+`SFX_VR_TIMING_GPU`, nothing extra is recorded; `--profile-csv` alone keeps the
+3-entry pool.
+
+Caveat: the Adreno 750 is a tiler. Under GMEM rendering the pass is replayed per
+tile, and Turnip writes an in-pass timestamp in every tile, so the value read back
+is the last tile's. The segments then describe one tile's work, not the whole eye.
+Read them as proportions: which segment dominates and how that changes between
+runs. Compare `gpu_eyes` for absolute cost. If Turnip renders the pass in sysmem
+mode instead, the segments are whole-eye times.
+
+To check on the device: the usual forced LEVEL1_1 capture with
+`SFX_VR_TIMING_GPU=1`, then look for `passes=` in `vr-session.log`.
+

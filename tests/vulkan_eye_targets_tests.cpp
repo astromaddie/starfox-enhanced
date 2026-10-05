@@ -113,6 +113,29 @@ VKAPI_ATTR VkResult VKAPI_CALL fence_status(VkDevice,VkFence fence) {return fenc
 VKAPI_ATTR VkResult VKAPI_CALL wait_fences(VkDevice,uint32_t count,const VkFence* fences,VkBool32,uint64_t timeout) {
     require(timeout<=1000000 && count==1);++fence_waits;return fence_pending(*fences)?VK_TIMEOUT:VK_SUCCESS;
 }
+uint32_t query_pool_size{};
+std::vector<uint32_t> timestamp_writes;
+std::vector<bool> timestamps_in_pass;
+const std::array<uint64_t,8> fake_stamps{1000,9000,1500,2000,2100,5100,5300,6000};
+VKAPI_ATTR VkResult VKAPI_CALL create_query_pool(VkDevice,const VkQueryPoolCreateInfo* info,const VkAllocationCallbacks*,VkQueryPool* out) {
+    require(info->queryType==VK_QUERY_TYPE_TIMESTAMP);query_pool_size=info->queryCount;*out=handle<VkQueryPool>(1);return VK_SUCCESS;
+}
+VKAPI_ATTR void VKAPI_CALL destroy_query_pool(VkDevice,VkQueryPool,const VkAllocationCallbacks*) {}
+VKAPI_ATTR void VKAPI_CALL reset_query_pool(VkCommandBuffer,VkQueryPool,uint32_t first,uint32_t count) {
+    require(first==0 && count==query_pool_size && !inside_pass);timestamp_writes.clear();timestamps_in_pass.clear();
+}
+VKAPI_ATTR void VKAPI_CALL write_timestamp(VkCommandBuffer,VkPipelineStageFlagBits stage,VkQueryPool,uint32_t query) {
+    require(query<query_pool_size && (!inside_pass || stage==VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT));
+    timestamp_writes.push_back(query);timestamps_in_pass.push_back(inside_pass);
+}
+VKAPI_ATTR VkResult VKAPI_CALL query_results(VkDevice,VkQueryPool,uint32_t first,uint32_t count,size_t size,void* data,
+    VkDeviceSize stride,VkQueryResultFlags flags) {
+    require(stride==16 && size>=count*stride && first+count<=query_pool_size
+        && flags==(VK_QUERY_RESULT_64_BIT|VK_QUERY_RESULT_WITH_AVAILABILITY_BIT));
+    auto* out=static_cast<uint64_t*>(data);
+    for(uint32_t i=0;i<count;++i) {out[2*i]=fake_stamps[first+i];out[2*i+1]=1;}
+    return VK_SUCCESS;
+}
 VKAPI_ATTR VkResult VKAPI_CALL pass(VkDevice,const VkRenderPassCreateInfo* info,const VkAllocationCallbacks*,VkRenderPass* out) {
     require(info->attachmentCount==1 && info->subpassCount==1);
     require(info->pAttachments[0].finalLayout==VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -153,6 +176,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL get(VkDevice,const char* name) {
     ENTRY("vkCmdPushConstants",push);ENTRY("vkCmdSetViewport",viewport);ENTRY("vkCmdSetScissor",scissor);ENTRY("vkCmdDraw",draw_scene);
     ENTRY("vkCreateBuffer",create_buffer);ENTRY("vkDestroyBuffer",destroy_buffer);ENTRY("vkGetBufferMemoryRequirements",requirements);
     ENTRY("vkAllocateMemory",allocate_memory);ENTRY("vkFreeMemory",free_memory);ENTRY("vkBindBufferMemory",bind_memory);
+    ENTRY("vkCreateQueryPool",create_query_pool);ENTRY("vkDestroyQueryPool",destroy_query_pool);
+    ENTRY("vkCmdResetQueryPool",reset_query_pool);ENTRY("vkCmdWriteTimestamp",write_timestamp);
+    ENTRY("vkGetQueryPoolResults",query_results);
     ENTRY("vkMapMemory",map_memory);ENTRY("vkUnmapMemory",unmap_memory);ENTRY("vkFlushMappedMemoryRanges",flush_memory);
 #undef ENTRY
     return nullptr;
@@ -318,6 +344,50 @@ int main(int argc,char** argv) try {
         require(serial.draw(1,1,camera,125,clear)==Eye::fatal);
         blocked_fences.clear();
         require(serial.draw(0,0,camera,125,clear)==Eye::complete);
+    }
+    {
+        // SFX_VR_TIMING_GPU: the pass start, three marks and the end of record
+        // are written inside the pass, in order, between the buffer's ends.
+        using Completion=VulkanEyeCommands::Completion;
+        const auto near=[](double a,double b) {return a>b-1e-9 && a<b+1e-9;};
+        pending_fence=false;
+        VulkanEyeCommands timed;
+        require(timed.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get,VulkanEyeCommands::TimestampConfig{64,1000.,true}));
+        require(timed.gpu_timestamps_available() && query_pool_size==8);
+        VkClearColorValue clear{};
+        timed.mark(handle<VkCommandBuffer>(1),0); // Not recording: nothing written.
+        require(timestamp_writes.empty());
+        require(timed.submit(targets,0,0,clear,[&](VkCommandBuffer command,VkExtent2D) {
+            for(unsigned index=0;index<4;++index) timed.mark(command,index); // 3 is past the last segment.
+            timed.mark(handle<VkCommandBuffer>(9),0); // Another buffer.
+        },[&](VkCommandBuffer command,VkExtent2D) {timed.mark(command,0);})); // Outside the pass.
+        require(timestamp_writes==std::vector<uint32_t>({0,2,3,4,5,6,7,1}));
+        require(timestamps_in_pass==std::vector<bool>({false,false,true,true,true,true,true,false}));
+        require(timed.poll()==Completion::complete);
+        const auto passes=timed.take_pass_ms();
+        require(passes && near((*passes)[0],.1) && near((*passes)[1],3.) && near((*passes)[2],.2) && near((*passes)[3],.7));
+        require(!timed.take_pass_ms() && near(timed.take_gpu_duration_ms().value_or(0),8.) && near(timed.take_pre_pass_ms().value_or(0),.5));
+        // A pass that skipped a mark (an early return) reports no segments.
+        require(timed.submit(targets,0,0,clear,[&](VkCommandBuffer command,VkExtent2D) {timed.mark(command,0);}));
+        require(timed.poll()==Completion::complete && !timed.take_pass_ms() && timed.take_gpu_duration_ms());
+        // The stereo adapter forwards marks to the eye being recorded only.
+        VulkanStereoDraw draw(timed,targets);EyeCamera camera{};
+        require(draw.draw(0,0,camera,1,clear,[&](VkCommandBuffer command,VkExtent2D,const EyeCamera&,XrTime) {
+            for(unsigned index=0;index<3;++index) draw.mark(command,index);
+        })==StereoRenderer::EyeResult::complete);
+        // The adapter always passes a pre-pass callback, so query 2 is written too.
+        require(draw.take_last_eye_timing().pass_gpu_ms.has_value() && timestamp_writes.size()==8);
+        draw.mark(handle<VkCommandBuffer>(1),0);require(timestamp_writes.size()==8);
+        // Timing without SFX_VR_TIMING_GPU (--profile-csv): the three-query
+        // pool, no in-pass writes, marks ignored.
+        VulkanEyeCommands plain;
+        require(plain.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get,VulkanEyeCommands::TimestampConfig{64,1000.}));
+        require(query_pool_size==3);
+        require(plain.submit(targets,0,0,clear,[&](VkCommandBuffer command,VkExtent2D) {
+            for(unsigned index=0;index<3;++index) plain.mark(command,index);
+        }));
+        require(timestamp_writes==std::vector<uint32_t>({0,1}));
+        require(plain.poll()==Completion::complete && !plain.take_pass_ms() && near(plain.take_gpu_duration_ms().value_or(0),8.));
     }
     {
         VulkanEyeCommands unsupported;

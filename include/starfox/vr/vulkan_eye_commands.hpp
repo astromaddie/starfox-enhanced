@@ -1,8 +1,10 @@
 #pragma once
 #include "starfox/vr/vulkan_eye_targets.hpp"
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 namespace starfox::vr {
 // One in-flight eye submission. Caller serializes access to the shared queue.
 // Never release an XR image until poll() returns complete. Errors require
@@ -12,7 +14,12 @@ public:
     enum class Completion {complete,pending,error};
     using Record=std::function<void(VkCommandBuffer,VkExtent2D)>;
     struct TimelineWait {VkSemaphore semaphore{};uint64_t value{};VkPipelineStageFlags stage{VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};};
-    struct TimestampConfig {std::uint32_t valid_bits{};double period_ns{};};
+    // passes adds in-pass timestamps for per-segment GPU time (SFX_VR_TIMING_GPU).
+    struct TimestampConfig {std::uint32_t valid_bits{};double period_ns{};bool passes{};};
+    // Eye pass segments: sky, models, sprites, cockpit. The pass start, the
+    // pass_segments-1 mark()s and the end of record bound them.
+    static constexpr unsigned pass_segments=4;
+    using PassDurations=std::array<double,pass_segments>;
     VulkanEyeCommands()=default;
     ~VulkanEyeCommands();
     VulkanEyeCommands(const VulkanEyeCommands&)=delete;
@@ -40,7 +47,18 @@ public:
     std::optional<double> take_pre_pass_ms() noexcept {
         auto result=pre_pass_ms_;pre_pass_ms_.reset();return result;
     }
+    // End segment `index` (0..pass_segments-2) inside submit()'s record
+    // callback. A no-op unless pass timestamps are active, so nothing extra is
+    // recorded without them. Durations exist only when every mark was written.
+    void mark(VkCommandBuffer,unsigned index) noexcept;
+    std::optional<PassDurations> take_pass_ms() noexcept {
+        auto result=pass_ms_;pass_ms_.reset();return result;
+    }
     static std::optional<double> timestamp_duration_ms(std::uint64_t begin,std::uint64_t end,
+        std::uint32_t valid_bits,double period_ns) noexcept;
+    // Consecutive boundary differences. Tilers may report a boundary slightly
+    // before the previous one; such a segment counts as zero, not a wrap.
+    static std::optional<PassDurations> pass_durations_ms(std::span<const std::uint64_t,pass_segments+1>,
         std::uint32_t valid_bits,double period_ns) noexcept;
     void close() noexcept;
     const std::string& status() const noexcept {return status_;}
@@ -53,7 +71,9 @@ private:
     std::uint32_t timestamp_valid_bits_{};
     double timestamp_period_ns_{};
     std::optional<double> gpu_duration_ms_,pre_pass_ms_;
-    bool pre_pass_marked_{};
+    std::optional<PassDurations> pass_ms_;
+    bool pre_pass_marked_{},pass_timestamps_{},in_pass_{};
+    unsigned pass_marks_{};
     PFN_vkDestroyCommandPool destroy_pool_{};
     PFN_vkDestroyFence destroy_fence_{};
     PFN_vkQueueWaitIdle idle_{};
@@ -73,4 +93,14 @@ private:
     std::string status_{"Eye commands not initialized"};
     std::string timestamp_status_{"GPU timestamps not requested"};
 };
+// [vr-perf] passes=: each segment's per-eye mean over the window, summed over
+// both eyes. Nothing until both eyes have a sample.
+inline std::optional<VulkanEyeCommands::PassDurations> eye_pass_means(
+    const std::array<VulkanEyeCommands::PassDurations,2>& sums,const std::array<unsigned,2>& frames) noexcept {
+    if(!frames[0] || !frames[1]) return std::nullopt;
+    VulkanEyeCommands::PassDurations result{};
+    for(unsigned segment=0;segment<result.size();++segment)
+        result[segment]=sums[0][segment]/frames[0]+sums[1][segment]/frames[1];
+    return result;
+}
 }

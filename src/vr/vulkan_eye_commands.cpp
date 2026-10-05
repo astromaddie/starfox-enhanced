@@ -15,6 +15,10 @@ template<class T> T optional_entry(PFN_vkGetDeviceProcAddr get,VkDevice device,c
 void check(VkResult result,const char* operation) {
     if(result!=VK_SUCCESS) throw std::runtime_error(std::string(operation)+": "+std::to_string(result));
 }
+// Queries: 0 command start, 1 command end, 2 pre-pass end, then with pass
+// timing 3 render pass begun, 4.. one per mark(), last the end of record.
+constexpr std::uint32_t pass_query=3,pass_queries=VulkanEyeCommands::pass_segments+1;
+constexpr unsigned all_pass_marks=(1U<<pass_queries)-1U;
 }
 VulkanEyeCommands::~VulkanEyeCommands() {close();}
 void VulkanEyeCommands::close() noexcept {
@@ -23,7 +27,8 @@ void VulkanEyeCommands::close() noexcept {
     if(fence_) destroy_fence_(device_,fence_,nullptr);
     if(pool_) destroy_pool_(device_,pool_,nullptr);
     device_={};queue_={};pool_={};command_={};fence_={};query_pool_={};pending_=failed_=false;
-    timestamps_active_=pre_pass_marked_=false;timestamp_valid_bits_=0;timestamp_period_ns_=0.;gpu_duration_ms_.reset();pre_pass_ms_.reset();
+    timestamps_active_=pre_pass_marked_=pass_timestamps_=in_pass_=false;pass_marks_=0;
+    timestamp_valid_bits_=0;timestamp_period_ns_=0.;gpu_duration_ms_.reset();pre_pass_ms_.reset();pass_ms_.reset();
     destroy_query_pool_=nullptr;reset_query_pool_=nullptr;write_timestamp_=nullptr;get_query_results_=nullptr;
     timestamp_status_="GPU timestamps not initialized";
 }
@@ -72,14 +77,16 @@ bool VulkanEyeCommands::initialize(VkDevice device,VkQueue queue,uint32_t family
                 timestamp_status_="unavailable: Vulkan timestamp query entry point missing";
             } else {
                 VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-                query.queryType=VK_QUERY_TYPE_TIMESTAMP;query.queryCount=3;
+                query.queryType=VK_QUERY_TYPE_TIMESTAMP;query.queryCount=timestamps->passes?pass_query+pass_queries:3;
                 const auto created=create_query_pool(device,&query,nullptr,&query_pool_);
                 if(created!=VK_SUCCESS) {
                     query_pool_={};
                     timestamp_status_="unavailable: vkCreateQueryPool failed ("+std::to_string(created)+")";
                 } else {
                     timestamp_valid_bits_=timestamps->valid_bits;timestamp_period_ns_=timestamps->period_ns;
-                    timestamps_active_=true;timestamp_status_="available: reusable Vulkan timestamp query pool";
+                    timestamps_active_=true;pass_timestamps_=timestamps->passes;
+                    timestamp_status_=pass_timestamps_?"available: reusable Vulkan timestamp query pool with eye pass segments"
+                        :"available: reusable Vulkan timestamp query pool";
                 }
             }
         }
@@ -103,7 +110,18 @@ bool VulkanEyeCommands::submit(const VulkanEyeTargets& targets,unsigned eye,unsi
         pass.renderPass=targets.render_pass();pass.framebuffer=targets.framebuffer(eye,image);
         pass.renderArea.extent=extent;pass.clearValueCount=targets.has_depth()?2:1;pass.pClearValues=clear.data();
         begin_pass_(command,&pass,VK_SUBPASS_CONTENTS_INLINE);
+        // Legal inside a render pass. On a tiler each in-pass write may land
+        // per tile (Turnip keeps the last), so segments are coarse: compare them
+        // with each other, not with the whole-buffer gpu duration.
+        const bool passes=timestamps_active_ && pass_timestamps_;
+        if(passes) {write_timestamp_(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,query_pool_,pass_query);pass_marks_|=1U;}
+        in_pass_=passes;
         if(record) record(command,extent);
+        in_pass_=false;
+        if(passes) {
+            write_timestamp_(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,query_pool_,pass_query+pass_queries-1);
+            pass_marks_|=1U<<(pass_queries-1);
+        }
         end_pass_(command);
         if(after_render) after_render(command,extent);
     },wait);
@@ -119,12 +137,12 @@ bool VulkanEyeCommands::submit_work(VkExtent2D extent,const Record& record,const
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         begin.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check(begin_(command_,&begin),"Begin eye commands");
-        pre_pass_marked_=false;
+        pre_pass_marked_=in_pass_=false;pass_marks_=0;
         if(timestamps_active_) {
-            reset_query_pool_(command_,query_pool_,0,3);
+            reset_query_pool_(command_,query_pool_,0,pass_timestamps_?pass_query+pass_queries:3);
             write_timestamp_(command_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,query_pool_,0);
         }
-        record(command_,extent);
+        try {record(command_,extent);} catch(...) {in_pass_=false;throw;}
         if(timestamps_active_)
             write_timestamp_(command_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,query_pool_,1);
         check(end_(command_),"End eye commands");
@@ -149,7 +167,7 @@ VulkanEyeCommands::Completion VulkanEyeCommands::poll(uint64_t timeout_ns) {
         timeout_ns>1000000?1000000:timeout_ns):fence_status_(device_,fence_);
     if(result==VK_NOT_READY || result==VK_TIMEOUT) return Completion::pending;
     if(result==VK_SUCCESS) {
-        pending_=false;gpu_duration_ms_.reset();pre_pass_ms_.reset();
+        pending_=false;gpu_duration_ms_.reset();pre_pass_ms_.reset();pass_ms_.reset();
         if(timestamps_active_ && pre_pass_marked_) {
             std::array<std::uint64_t,4> values{};
             if(get_query_results_(device_,query_pool_,0,1,sizeof(values),values.data(),2*sizeof(std::uint64_t),
@@ -157,6 +175,15 @@ VulkanEyeCommands::Completion VulkanEyeCommands::poll(uint64_t timeout_ns) {
                 && get_query_results_(device_,query_pool_,2,1,sizeof(values)/2,values.data()+2,2*sizeof(std::uint64_t),
                 VK_QUERY_RESULT_64_BIT|VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)==VK_SUCCESS && values[3])
                 pre_pass_ms_=timestamp_duration_ms(values[0],values[2],timestamp_valid_bits_,timestamp_period_ns_);
+        }
+        if(timestamps_active_ && pass_timestamps_ && pass_marks_==all_pass_marks) {
+            std::array<std::uint64_t,2*pass_queries> values{};
+            if(get_query_results_(device_,query_pool_,pass_query,pass_queries,sizeof(values),values.data(),
+                2*sizeof(std::uint64_t),VK_QUERY_RESULT_64_BIT|VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)==VK_SUCCESS) {
+                std::array<std::uint64_t,pass_queries> stamps{};bool available=true;
+                for(unsigned i=0;i<pass_queries;++i) {stamps[i]=values[2*i];available=available && values[2*i+1];}
+                if(available) pass_ms_=pass_durations_ms(stamps,timestamp_valid_bits_,timestamp_period_ns_);
+            }
         }
         if(timestamps_active_) {
             std::array<std::uint64_t,4> values{};
@@ -172,6 +199,24 @@ VulkanEyeCommands::Completion VulkanEyeCommands::poll(uint64_t timeout_ns) {
         return Completion::complete;
     }
     failed_=true;status_="Eye fence failed: "+std::to_string(result);return Completion::error;
+}
+void VulkanEyeCommands::mark(VkCommandBuffer command,unsigned index) noexcept {
+    if(!in_pass_ || command!=command_ || index+1>=pass_queries-1) return;
+    write_timestamp_(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,query_pool_,pass_query+1+index);
+    pass_marks_|=1U<<(1+index);
+}
+std::optional<VulkanEyeCommands::PassDurations> VulkanEyeCommands::pass_durations_ms(
+    std::span<const std::uint64_t,pass_segments+1> stamps,std::uint32_t valid_bits,double period_ns) noexcept {
+    if(valid_bits==0 || valid_bits>64) return std::nullopt;
+    const auto range=valid_bits<64?(std::uint64_t{1}<<valid_bits)-1U:~std::uint64_t{};
+    PassDurations result{};
+    for(unsigned i=0;i<pass_segments;++i) {
+        const bool backwards=((stamps[i+1]-stamps[i])&range)>range/2;
+        const auto ms=timestamp_duration_ms(stamps[i],backwards?stamps[i]:stamps[i+1],valid_bits,period_ns);
+        if(!ms) return std::nullopt;
+        result[i]=*ms;
+    }
+    return result;
 }
 std::optional<double> VulkanEyeCommands::timestamp_duration_ms(std::uint64_t begin,std::uint64_t end,
     std::uint32_t valid_bits,double period_ns) noexcept {

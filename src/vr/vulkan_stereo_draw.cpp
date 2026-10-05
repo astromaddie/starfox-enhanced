@@ -9,13 +9,16 @@ StereoRenderer::EyeResult VulkanStereoDraw::draw(unsigned eye,uint32_t image,
     if(slot.submitted && (eye!=slot.eye || image!=slot.image)) return Result::fatal;
     if(!slot.submitted) {
         slot.submitted_at=std::chrono::steady_clock::now();
-        if(!commands.submit(targets_,eye,image,clear,[&](VkCommandBuffer command,VkExtent2D extent) {
+        recording_=&commands;
+        const bool queued=commands.submit(targets_,eye,image,clear,[&](VkCommandBuffer command,VkExtent2D extent) {
             if(record) record(command,extent,camera,time);
         },[&](VkCommandBuffer command,VkExtent2D extent) {
             if(before_render) before_render(command,extent,camera,time);
         },[&](VkCommandBuffer command,VkExtent2D extent) {
             if(after_render) after_render(command,extent,camera,time);
-        },wait)) {
+        },wait);
+        recording_=nullptr;
+        if(!queued) {
             return commands.poll()==VulkanEyeCommands::Completion::complete?Result::failed:Result::fatal;
         }
         ++timing_.submissions;
@@ -37,6 +40,7 @@ StereoRenderer::EyeResult VulkanStereoDraw::draw(unsigned eye,uint32_t image,
         last_eye_timing_.submit_to_fence_cpu_ms=elapsed;
         last_eye_timing_.gpu_timestamp_ms=commands.take_gpu_duration_ms();
         last_eye_timing_.pre_pass_gpu_ms=commands.take_pre_pass_ms();
+        last_eye_timing_.pass_gpu_ms=commands.take_pass_ms();
         last_eye_timing_.submitted_at=slot.submitted_at;last_eye_timing_.completed_at=completed;
         slot.submitted=false;return Result::complete;
     }

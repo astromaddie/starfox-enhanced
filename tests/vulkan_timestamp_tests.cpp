@@ -1,5 +1,6 @@
 #include "starfox/vr/vulkan_eye_commands.hpp"
 #include "starfox/vr/vulkan_loader.hpp"
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -39,12 +40,41 @@ void check_timestamp_math() {
     require(!starfox::vr::VulkanEyeCommands::timestamp_duration_ms(1,2,64,0.),
         "invalid timestamp period produced a GPU duration");
 }
+void check_pass_math() {
+    using Commands=starfox::vr::VulkanEyeCommands;
+    const auto near=[](double a,double b) {return std::abs(a-b)<1e-12;};
+    // Five boundaries (pass start, three marks, end of record) give four segments.
+    const std::array<std::uint64_t,Commands::pass_segments+1> stamps{100,130,1130,1180,1380};
+    const auto passes=Commands::pass_durations_ms(stamps,64,1000.);
+    require(passes && near((*passes)[0],.03) && near((*passes)[1],1.) && near((*passes)[2],.05) && near((*passes)[3],.2),
+        "eye pass segment durations are wrong");
+    // A counter wrapping inside the pass still gives forward segments.
+    const std::array<std::uint64_t,Commands::pass_segments+1> wrapped{250,253,2,6,10};
+    const auto wrapped_passes=Commands::pass_durations_ms(wrapped,8,1'000'000.);
+    require(wrapped_passes && near((*wrapped_passes)[0],3.) && near((*wrapped_passes)[1],5.)
+        && near((*wrapped_passes)[2],4.) && near((*wrapped_passes)[3],4.),"wrapped eye pass segments are wrong");
+    // A tiler reporting a boundary early is a zero segment, never a near-full wrap.
+    const std::array<std::uint64_t,Commands::pass_segments+1> early{1000,1200,1190,1300,1300};
+    const auto early_passes=Commands::pass_durations_ms(early,64,1.);
+    require(early_passes && near((*early_passes)[1],0.) && near((*early_passes)[2],110e-6) && near((*early_passes)[3],0.),
+        "an out-of-order eye pass boundary was not clamped to zero");
+    require(!Commands::pass_durations_ms(stamps,0,1.) && !Commands::pass_durations_ms(stamps,65,1.)
+        && !Commands::pass_durations_ms(stamps,64,0.),"invalid timestamp properties produced eye pass segments");
+    // [vr-perf] passes=: per-eye window means, summed over both eyes.
+    const std::array<Commands::PassDurations,2> sums{{{2.,4.,6.,8.},{3.,3.,3.,3.}}};
+    const auto means=starfox::vr::eye_pass_means(sums,{2,3});
+    require(means && near((*means)[0],2.) && near((*means)[1],3.) && near((*means)[2],4.) && near((*means)[3],5.),
+        "eye pass window means are wrong");
+    require(!starfox::vr::eye_pass_means(sums,{2,0}) && !starfox::vr::eye_pass_means(sums,{0,3}),
+        "eye pass means reported without both eyes");
+}
 }
 
 int main(int argc,char** argv) try {
     check_timestamp_math();
+    check_pass_math();
     if(argc==2 && std::string(argv[1])=="--math-only") {
-        std::cout<<"Vulkan timestamp period conversion and valid-bit wraparound passed\n";
+        std::cout<<"Vulkan timestamp period conversion, valid-bit wraparound and eye pass segments passed\n";
         return 0;
     }
     const bool require_native=argc==2 && std::string(argv[1])=="--require-native";
@@ -131,7 +161,7 @@ int main(int argc,char** argv) try {
     starfox::vr::VulkanEyeCommands commands;
     require(commands.initialize(device.handle,queue,selected_family,get_device_proc,
         starfox::vr::VulkanEyeCommands::TimestampConfig{
-            selected_queue.timestampValidBits,selected_properties.limits.timestampPeriod}),
+            selected_queue.timestampValidBits,selected_properties.limits.timestampPeriod,true}),
         "Vulkan timestamp command owner failed to initialize");
     if(!commands.gpu_timestamps_available()) {
         return unavailable(commands.timestamp_status());
@@ -152,6 +182,8 @@ int main(int argc,char** argv) try {
         const auto elapsed=commands.take_gpu_duration_ms();
         require(elapsed && std::isfinite(*elapsed) && *elapsed>=0.,
             "Fence-complete Vulkan timestamp query did not return a valid GPU duration");
+        // The larger pool still times the buffer; with no render pass there are no segments.
+        require(!commands.take_pass_ms(),"Work without an eye pass reported pass segments");
     }
     std::cout<<"Vulkan timestamp query/readback passed on "<<selected_properties.deviceName
         <<" (queue family "<<selected_family<<", valid bits "<<selected_queue.timestampValidBits

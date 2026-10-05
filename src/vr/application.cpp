@@ -689,22 +689,24 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     }
     starfox::vr::VulkanEyeCommands commands;
     if(live && !live->output.open()) {std::cerr<<live->output.status()<<'\n';return 8;}
-    const bool timing_gpu=starfox::vr::env_override_bool("timing_gpu").value_or(false);
-    const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled() || timing_gpu
+    const auto diagnostics=starfox::vr::diagnostic_overrides();
+    const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled() || diagnostics.timing_gpu
         ?std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig>(
             starfox::vr::VulkanEyeCommands::TimestampConfig{
                 device.timestamp_valid_bits(),device.timestamp_period_ns()})
         :std::nullopt;
-    if(!commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) {
+    // SFX_VR_TIMING_GPU alone adds the eye pass segment timestamps.
+    auto eye_timestamps=timestamp_config;
+    if(eye_timestamps) eye_timestamps->passes=diagnostics.timing_gpu;
+    if(!commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,eye_timestamps)) {
         std::cerr<<commands.status()<<'\n';return 8;
     }
-    const auto diagnostics=starfox::vr::diagnostic_overrides();
     // SFX_VR_OVERLAP_EYES: eye 1 gets its own buffer, fence and query pool so
     // it can queue behind eye 0 before eye 0's fence. device.queue() is the
     // graphics binding's queue (queueIndex 0 of its family), as OpenXR requires.
     starfox::vr::VulkanEyeCommands right_commands;
     if(diagnostics.overlap_eyes && !right_commands.initialize(device.binding().device,device.queue(),
-        device.binding().queueFamilyIndex,get_device,timestamp_config)) {std::cerr<<right_commands.status()<<'\n';return 8;}
+        device.binding().queueFamilyIndex,get_device,eye_timestamps)) {std::cerr<<right_commands.status()<<'\n';return 8;}
     auto& right_eye_commands=diagnostics.overlap_eyes?right_commands:commands;
     starfox::vr::VulkanEyeCommands ui_commands;
     if(!ui_commands.initialize(device.binding().device,device.queue(),device.binding().queueFamilyIndex,get_device,timestamp_config)) return 8;
@@ -797,6 +799,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     std::array<std::optional<starfox::vr::VulkanStereoDraw::EyeTiming>,2> eye_frame_profile;
     std::array<double,2> gpu_eye_sum{};std::array<unsigned,2> gpu_eye_frames{};
     double pre_pass_sum=0;unsigned pre_pass_frames=0;
+    std::array<starfox::vr::VulkanEyeCommands::PassDurations,2> pass_sum{};std::array<unsigned,2> pass_frames{};
     std::optional<starfox::vr::VulkanStereoDraw::EyeTiming> ui_frame_profile;
     std::optional<std::chrono::steady_clock::time_point> last_profiled_submission;
     std::string game_error;
@@ -1706,6 +1709,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     throw std::runtime_error("Tunnel background surround recording failed");
                 if(render_game && controls_stars && !surrounding_stars.record(command,extent,eye_camera))
                     throw std::runtime_error("Controls starfield recording failed");
+                draw.mark(command,0); // SFX_VR_TIMING_GPU segments: sky ends.
                 if(render_triangle && !pipeline.record(command,extent,vertices.buffer(),vertices.count(),eye_camera))
                     throw std::runtime_error("Triangle recording failed");
                 if((render_model || render_game) && !(render_game && compute_scene_active
@@ -1718,10 +1722,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         throw std::runtime_error("Bomb circle recording failed");
                 };
                 if(!circle_over_hud) draw_circle();
+                draw.mark(command,1); // Models end.
                 if(render_game && sandbox.active() && !pointer_layer_ready && !sandbox_pointer.record(command,extent,eye_camera))
                     throw std::runtime_error("Sandbox pointer recording failed");
                 if(render_game && !world_panel_scene(*live->history->current()) && !sprites.record(command,extent,eye_camera))
                     throw std::runtime_error("Native sprite layer recording failed");
+                draw.mark(command,2); // Sprites end; the cockpit runs to the end of the pass.
                 auto instrument_camera=tracking_camera;
                 instrument_camera.view=multiply_matrix(tracking_camera.view,instrument_transform);
                 if(render_game && !cabin.record(command,extent,instrument_camera))
@@ -1844,6 +1850,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     frame.gpu_ms[eye_index]=eye_frame_profile[eye_index]->gpu_timestamp_ms;
                     if(const auto gpu=eye_frame_profile[eye_index]->gpu_timestamp_ms) {gpu_eye_sum[eye_index]+=*gpu;++gpu_eye_frames[eye_index];}
                     if(const auto pre=eye_frame_profile[eye_index]->pre_pass_gpu_ms) {pre_pass_sum+=*pre;++pre_pass_frames;}
+                    if(const auto& passes=eye_frame_profile[eye_index]->pass_gpu_ms) {
+                        for(unsigned segment=0;segment<passes->size();++segment) pass_sum[eye_index][segment]+=(*passes)[segment];
+                        ++pass_frames[eye_index];
+                    }
                 }
                 // Overlap: eye 0 submit to eye 1 fence, the CPU wait both eyes
                 // cost together (serial frames are about eye0+eye1).
@@ -1873,6 +1883,10 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     overlap_span_sum=0;overlap_span_frames=0;
                     if(perf_window_forced) rate<<" forced=1";
                     perf_window_forced=false;
+                    // Each segment's mean per eye, summed over both eyes.
+                    if(const auto passes=starfox::vr::eye_pass_means(pass_sum,pass_frames)) rate<<std::fixed<<std::setprecision(2)
+                        <<" passes=sky:"<<(*passes)[0]<<",models:"<<(*passes)[1]<<",sprites:"<<(*passes)[2]<<",cockpit:"<<(*passes)[3];
+                    pass_sum={};pass_frames={};
                     session_log(*line+rate.str());
                 }
             }

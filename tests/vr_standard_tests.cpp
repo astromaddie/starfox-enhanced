@@ -205,8 +205,12 @@ void diagnostic_env() {
     auto diag=diagnostic_overrides(fake_getenv);
     require(!diag.active() && !diag.force_render && diag.yaw_degrees==0 && !diag.autostart && !diag.exit_after_seconds);
     // Unrelated standard keys do not turn diagnostics on.
-    fake_env["SFX_VR_HAPTICS"]="0.5";fake_env["SFX_VR_TIMING_GPU"]="1";
+    fake_env["SFX_VR_HAPTICS"]="0.5";
     require(!diagnostic_overrides(fake_getenv).active());
+    // TIMING_GPU does: it adds the eye pass segment timestamps.
+    fake_env["SFX_VR_TIMING_GPU"]="1";diag=diagnostic_overrides(fake_getenv);
+    require(diag.active() && diag.timing_gpu && diag.describe()=="[vr] diagnostic overrides: timing_gpu=1");
+    fake_env["SFX_VR_TIMING_GPU"]="0";require(!diagnostic_overrides(fake_getenv).active());
     fake_env["SFX_VR_FORCE_RENDER"]="1";fake_env["SFX_VR_DIAG_YAW"]="90";
     fake_env["SFX_VR_AUTOSTART"]=" LEVEL1_1 ";fake_env["SFX_VR_EXIT_AFTER"]="60";
     diag=diagnostic_overrides(fake_getenv);

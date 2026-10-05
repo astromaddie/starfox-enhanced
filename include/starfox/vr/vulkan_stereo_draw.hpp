@@ -20,6 +20,7 @@ public:
         double submit_to_fence_cpu_ms{};
         std::optional<double> gpu_timestamp_ms;
         std::optional<double> pre_pass_gpu_ms;
+        std::optional<VulkanEyeCommands::PassDurations> pass_gpu_ms;
         std::chrono::steady_clock::time_point submitted_at{},completed_at{};
     };
     // CPU elapsed submission-to-fence-observation time, including polling
@@ -27,6 +28,8 @@ public:
     CompletionTiming take_completion_timing() noexcept {auto result=timing_;timing_={};return result;}
     EyeTiming take_last_eye_timing() noexcept {auto result=last_eye_timing_;last_eye_timing_={};return result;}
     bool pending() const noexcept {return slots_[0].submitted || slots_[1].submitted;}
+    // Ends a GPU timing segment of the eye being recorded (see VulkanEyeCommands::mark).
+    void mark(VkCommandBuffer command,unsigned index) noexcept {if(recording_) recording_->mark(command,index);}
     using Record=std::function<void(VkCommandBuffer,VkExtent2D,const EyeCamera&,XrTime)>;
     VulkanStereoDraw(VulkanEyeCommands& commands,const VulkanEyeTargets& targets,VulkanEyeCommands* right=nullptr)
         :targets_(targets),slots_{{{&commands},{right}}} {}
@@ -46,5 +49,6 @@ private:
     std::array<Slot,2> slots_;
     CompletionTiming timing_{};
     EyeTiming last_eye_timing_{};
+    VulkanEyeCommands* recording_{};
 };
 }
