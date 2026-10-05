@@ -1535,3 +1535,27 @@ It rendered with no Vulkan or shader errors, timings matched `b7b89bf`
 only matching journal line was SteamVR's existing devkit-title
 "LoadActionManifest failed" notice. The head-roll behaviour itself still needs
 a worn check: tilt your head near explosions and dust.
+
+## First worn frame-time data (October 5)
+
+The user wore `212cb89` (relayed by the testing session): the 120 Hz setting "does
+seem to feel a lot better". Entering the Corneria cutscene did not hold 120 at
+first, then stabilised. Notes on the laser, cockpit scale, render resolution
+and FPS were lost, so those stay unverified. Worn log:
+`build/frame-devkit/runs/212cb89-worn-2026-10-05.log` (100%, 2016x2016, GPU
+timing off).
+- Title and menus: 90 and then 120 fps (eye about 4–8 ms).
+- Corneria gameplay at 90 Hz: 45 fps (half rate). At 120 Hz: 42–68 fps, with
+  eye CPU submit-to-fence at about 7–10.6 / 5.3–9 ms. Neither 90 nor 120 is held
+  in gameplay. The dip the user saw entering Corneria is the step from the cheap
+  title scene to full gameplay cost, not a one-off hitch.
+- XR_FB_display_refresh_rate on the Frame enumerates only the current system
+  rate (90 while the system was at 90, then 120 after the user switched). So the
+  in-game request and the step-down governor cannot change the rate: the
+  system setting decides it.
+- New cross-port standard (skill references/standard.md §9): 120 Hz at a native
+  eye resolution of about 2160², falling back to 90 then 72; a heavy port may
+  default to 90 with a documented measurement. Star Fox currently renders at the
+  runtime recommendation (2016²) and needs about half its current GPU time per
+  frame to hold 120 there. Next step: per-pass GPU profiling, then shader
+  optimisation (DXC is now available).
