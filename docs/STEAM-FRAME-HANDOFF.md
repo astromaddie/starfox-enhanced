@@ -946,6 +946,7 @@ range. An override wins over the saved preference and is never written to
 | `SFX_VR_EXIT_AFTER` | Seconds after the first in-game frame; then quits through the QUIT TO STEAM path. Not a registry key. Added October 4 |
 | `SFX_VR_OVERLAP_EYES` | `1` submits eye 1 straight after eye 0 instead of waiting for eye 0's fence (see "Overlapped eye submission" below). Default off, which keeps the serial eye loop. Not a registry key. Added October 4 |
 | `SFX_VR_VISIBILITY_MASK` | `1` fetches each eye's hidden-area mesh through `XR_KHR_visibility_mask` and draws it first in the eye pass, so nothing is shaded where the lenses never look (see "Visibility mask" below). Default off, which leaves the pipelines and the eye pass unchanged. Ignored, with a log line, when the runtime lacks the extension. Not a registry key. Added October 5 |
+| `SFX_VR_ENHANCED_SKY` | `0`/`1` overrides the saved Enhanced Sky choice for this launch only. The 2D OPTIONS row shows `OFF ENV`/`ON ENV` and cannot be changed while overridden. Unset or invalid keeps the saved choice; preferences are never changed. Logs as `enhanced_sky=0`/`1` in the diagnostic overrides line. Not a registry key. Added October 5 |
 
 No other registry key is implemented by this port, so no other variable has any
 effect.

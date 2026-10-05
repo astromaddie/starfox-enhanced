@@ -237,6 +237,20 @@ int main() try {
         menu.selection=2;click();require(menu.preview);
         menu.selection=3;click();require(menu.enhanced_sky && menu.page==Page::two_d && menu.row_count()==5);
         menu.sample(press,true);require(menu.enhanced_sky);
+        const auto sky_preferences=menu.preferences();
+        for(const bool override:{false,true}) {
+            menu.enhanced_sky_override=override;
+            require(menu.labels()[3]==std::string("ENHANCED SKY: ")+(override?"ON ENV":"OFF ENV"));
+            const auto revision=menu.revision;
+            click();require(menu.enhanced_sky && menu.page==Page::two_d && menu.selection==3
+                && menu.revision==revision && menu.preferences()==sky_preferences);
+            StartupMenu saved;require(saved.restore_preferences(menu.preferences())
+                && saved.enhanced_sky_enabled() && !saved.enhanced_sky_override);
+        }
+        menu.enhanced_sky_override.reset();
+        require(menu.labels()[3]=="ENHANCED SKY: ON");
+        click();require(!menu.enhanced_sky && !menu.enhanced_sky_enabled() && menu.labels()[3]=="ENHANCED SKY: OFF");
+        click();require(menu.enhanced_sky);
         menu.selection=4;click();require(menu.page==Page::options);
         menu.selection=8;click();require(menu.steer_sensitivity_index==1
             && menu.labels()[8]=="STICK SENSITIVITY: 40%");

@@ -49,7 +49,7 @@ inline std::optional<bool> env_override_bool(const char* key,
     if(value<0) return std::nullopt;
     return value!=0;
 }
-// Unattended diagnostics, env only (never in the menu or the saved file):
+// Unattended diagnostics, never written to the saved file:
 // force_render (SFX_VR_FORCE_RENDER, 0/1) renders and plays in standby or
 // unfocused; diag_yaw (SFX_VR_DIAG_YAW, degrees about +Y, -360..360) turns the
 // rendered head; autostart (SFX_VR_AUTOSTART, e.g. LEVEL1_1) skips the startup
@@ -58,14 +58,17 @@ inline std::optional<bool> env_override_bool(const char* key,
 // registry key) submits eye 1 without waiting for eye 0's fence;
 // visibility_mask (SFX_VR_VISIBILITY_MASK, 0/1, not a registry key) masks each
 // eye's hidden area with XR_KHR_visibility_mask. Unset or unparseable leaves
-// each one off. timing_gpu (SFX_VR_TIMING_GPU) is a standard
+// each one off. enhanced_sky (SFX_VR_ENHANCED_SKY, 0/1, not a registry
+// key) overrides the saved sky choice and locks its menu row for this launch.
+// timing_gpu (SFX_VR_TIMING_GPU) is a standard
 // key, but it also adds the eye pass segment timestamps, so it shows here too.
 struct DiagnosticOverrides {
     bool force_render{},overlap_eyes{},timing_gpu{},visibility_mask{};
     float yaw_degrees{};
+    std::optional<bool> enhanced_sky;
     std::optional<std::string> autostart;
     std::optional<float> exit_after_seconds;
-    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes || timing_gpu || visibility_mask;}
+    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes || timing_gpu || visibility_mask || enhanced_sky;}
     std::string describe() const {
         std::ostringstream line;line<<"[vr] diagnostic overrides:";
         if(force_render) line<<" force_render=1";
@@ -75,6 +78,7 @@ struct DiagnosticOverrides {
         if(overlap_eyes) line<<" overlap_eyes=1";
         if(timing_gpu) line<<" timing_gpu=1";
         if(visibility_mask) line<<" visibility_mask=1";
+        if(enhanced_sky) line<<" enhanced_sky="<<int(*enhanced_sky);
         return line.str();
     }
 };
@@ -88,6 +92,7 @@ inline DiagnosticOverrides diagnostic_overrides(EnvGetter getter=process_getenv)
     result.overlap_eyes=env_override_bool("overlap_eyes",getter).value_or(false);
     result.timing_gpu=env_override_bool("timing_gpu",getter).value_or(false);
     result.visibility_mask=env_override_bool("visibility_mask",getter).value_or(false);
+    result.enhanced_sky=env_override_bool("enhanced_sky",getter);
     return result;
 }
 }

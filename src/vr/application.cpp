@@ -839,6 +839,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::CockpitFollowEase follow_ease;
     starfox::vr::Matrix4 instrument_transform=starfox::vr::identity_matrix;
     starfox::vr::StartupMenu startup;
+    startup.enhanced_sky_override=diagnostics.enhanced_sky;
     startup.haptics_override=starfox::vr::env_override_float("haptics");
     startup.refresh_override=starfox::vr::env_override_float("refresh_rate");
     startup.resolution_override=resolution_override;startup.active_resolution=resolution_scale;
@@ -1305,7 +1306,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             float(snapshot->source_vanishing_point[1])+16.F).value();
                     }
                     if(!sprite_revision || *sprite_revision!=snapshot->revision
-                        || uploaded_enhanced_sky!=startup.enhanced_sky || uploaded_cockpit_hud!=cockpit_active) {
+                        || uploaded_enhanced_sky!=startup.enhanced_sky_enabled() || uploaded_cockpit_hud!=cockpit_active) {
                         if(!snapshot->ppu) throw std::runtime_error("Live sprite pass has no PPU snapshot");
                         const bool compact_hud=snapshot->meters.enabled && !world_panel_scene(*snapshot);
                         live->dialogue_layout.set_language(uint8_t(startup.language));
@@ -1408,7 +1409,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                                 bg2=starfox::vr::water_surface_packet(*snapshot->ppu,background_options,
                                     std::clamp(std::abs(float(snapshot->camera.y-snapshot->shadow_height))/256.F,.01F,8.F),srgb);
                             else bg2.model=packet.model;
-                            auto photograph=startup.enhanced_sky?live->enhanced_landscape.prepare(*snapshot,live->game,load_vr_backdrop,srgb)
+                            auto photograph=startup.enhanced_sky_enabled()?live->enhanced_landscape.prepare(*snapshot,live->game,load_vr_backdrop,srgb)
                                 :std::optional<starfox::vr::DrawPacket>{};
                             if(photograph) live->enhanced_landscape.retain_native_ground(bg2,*snapshot->ppu);
                             if(!photograph && snapshot->flow==starfox::simulation::GameFlowState::game_over)
@@ -1527,7 +1528,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             throw std::runtime_error(hud.status());
                         uploaded_cockpit_hud=cockpit_active;
                         sprite_revision=snapshot->revision;
-                        uploaded_enhanced_sky=startup.enhanced_sky;
+                        uploaded_enhanced_sky=startup.enhanced_sky_enabled();
                     }
                     if(snapshot->background_orbital_planet && !snapshot->ppu->tunnel_scene) {
                         const auto before=live->history->previous();
@@ -1546,7 +1547,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         for(std::size_t i=0;i<uploaded_backgrounds.size();++i) {
                             const auto& background=uploaded_backgrounds[i];
                             if(!background.geometry.vertex_view().empty() || !background.geometry.line_view().empty())
-                                model_updates.push_back(startup.enhanced_sky && live->enhanced_landscape.orbital_body(background)
+                                model_updates.push_back(startup.enhanced_sky_enabled() && live->enhanced_landscape.orbital_body(background)
                                     ?photographic_motion:i==0?motion:background.model);
                         }
                         if(!backgrounds.update_models(model_updates)) throw std::runtime_error("Orbital horizon update failed");
@@ -1579,14 +1580,14 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             const auto& background=uploaded_backgrounds[i];
                             if(!background.geometry.vertex_view().empty() || !background.geometry.line_view().empty())
                                 model_updates.push_back((i==0 || snapshot->background_ex_city_planets
-                                    || (startup.enhanced_sky && live->enhanced_landscape.landscape_body(background))
+                                    || (startup.enhanced_sky_enabled() && live->enhanced_landscape.landscape_body(background))
                                     || (background.geometry.shared_texels && !background.geometry.vertex_view().empty()
                                         && (background.geometry.vertex_view().front().texture[3]&starfox::vr::backdrop_texture_flag)==starfox::vr::backdrop_texture_flag))
                                     ?motion:background.model);
                         }
                         if(!backgrounds.update_models(model_updates)) throw std::runtime_error("Landscape pitch update failed");
                     }
-                    if(startup.enhanced_sky && live->enhanced_landscape.scrolling_pattern()) {
+                    if(startup.enhanced_sky_enabled() && live->enhanced_landscape.scrolling_pattern()) {
                         const auto motion=live->enhanced_landscape.pattern_motion(*live->history->previous(),*snapshot,alpha);
                         model_updates.clear();
                         for(const auto& background:uploaded_backgrounds) {
@@ -1595,7 +1596,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         }
                         if(!backgrounds.update_models(model_updates)) throw std::runtime_error("Photographic panorama interpolation failed");
                     }
-                    if(startup.enhanced_sky && live->enhanced_landscape.moving_body()) {
+                    if(startup.enhanced_sky_enabled() && live->enhanced_landscape.moving_body()) {
                         model_updates.clear();
                         for(const auto& background:uploaded_backgrounds) {
                             const auto vertices=background.geometry.vertex_view();

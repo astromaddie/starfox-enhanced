@@ -28,6 +28,9 @@ public:
     bool msu_available{},msu_music{};
     bool ray_tracing{},ray_tracing_available{};
     bool enhanced_sky{};
+    // Keep the launch override out of the preference bytes.
+    std::optional<bool> enhanced_sky_override;
+    bool enhanced_sky_enabled() const noexcept {return enhanced_sky_override.value_or(enhanced_sky);}
     bool preview{}; // Session-only: never resume a game into preview automatically.
     unsigned model_effect{},world_effect{},model_intensity{100},world_intensity{100};
     static constexpr std::array<unsigned,11> supported_effects{0,1,4,8,9,10,11,13,14,15,16};
@@ -254,7 +257,7 @@ public:
                 if(selection==0) world_effect=next_style(world_effect,true);
                 else if(selection==1) world_intensity=(world_intensity+25)%125;
                 else if(selection==2) preview=!preview;
-                else if(selection==3) enhanced_sky=!enhanced_sky;
+                else if(selection==3) {if(enhanced_sky_override) return;enhanced_sky=!enhanced_sky;}
                 else {page=Page::options;selection=7;}
             } else {
                 if(selection==0) god_mode=!god_mode;
@@ -302,7 +305,7 @@ public:
                 std::string(models?"MODEL EFFECTS: ":"WORLD EFFECTS: ")+std::string(style_name(models?model_effect:world_effect)),
                 std::string(models?"MODEL EFFECT INTENSITY: ":"WORLD EFFECT INTENSITY: ")+std::to_string(models?model_intensity:world_intensity)+"%"};
             rows.push_back(std::string("PREVIEW: ")+(preview?"ON":"OFF"));
-            if(!models) rows.push_back(std::string("ENHANCED SKY: ")+(enhanced_sky?"ON":"OFF"));
+            if(!models) rows.push_back(std::string("ENHANCED SKY: ")+(enhanced_sky_enabled()?"ON":"OFF")+(enhanced_sky_override?" ENV":""));
             if(models && ray_tracing_available) rows.push_back(std::string("RAY TRACING: ")+(ray_tracing?"ON":"OFF"));
             rows.push_back("BACK");return rows;
         }

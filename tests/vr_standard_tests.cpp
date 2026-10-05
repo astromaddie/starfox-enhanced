@@ -204,6 +204,27 @@ void diagnostic_env() {
     fake_env.clear();
     auto diag=diagnostic_overrides(fake_getenv);
     require(!diag.active() && !diag.force_render && diag.yaw_degrees==0 && !diag.autostart && !diag.exit_after_seconds);
+    require(!diag.enhanced_sky);
+    StartupMenu sky;
+    for(const bool saved:{false,true}) {
+        sky.enhanced_sky=saved;sky.enhanced_sky_override=diag.enhanced_sky;
+        require(sky.enhanced_sky_enabled()==saved);
+        const auto preferences=sky.preferences();
+        for(const char* value:{"0","1"}) {
+            fake_env["SFX_VR_ENHANCED_SKY"]=value;diag=diagnostic_overrides(fake_getenv);
+            require(diag.active() && diag.enhanced_sky==(*value=='1')
+                && diag.describe()==std::string("[vr] diagnostic overrides: enhanced_sky=")+value);
+            sky.enhanced_sky_override=diag.enhanced_sky;
+            require(sky.enhanced_sky_enabled()==(*value=='1') && sky.preferences()==preferences);
+        }
+        for(const char* bad:{"","  ","maybe","2","-1","0.5","1x","nan"}) {
+            fake_env["SFX_VR_ENHANCED_SKY"]=bad;diag=diagnostic_overrides(fake_getenv);
+            require(!diag.active() && !diag.enhanced_sky);
+            sky.enhanced_sky_override=diag.enhanced_sky;
+            require(sky.enhanced_sky_enabled()==saved && sky.preferences()==preferences);
+        }
+    }
+    fake_env.clear();
     // Unrelated standard keys do not turn diagnostics on.
     fake_env["SFX_VR_HAPTICS"]="0.5";
     require(!diagnostic_overrides(fake_getenv).active());
