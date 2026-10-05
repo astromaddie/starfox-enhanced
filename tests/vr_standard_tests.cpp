@@ -225,6 +225,18 @@ void diagnostic_env() {
         }
     }
     fake_env.clear();
+    require(!diag.backdrop_sampler && diag.backdrop_sampler_enabled());
+    for(const char* value:{"0","1"," false "," true "}) {
+        fake_env["SFX_VR_BACKDROP_SAMPLER"]=value;diag=diagnostic_overrides(fake_getenv);
+        const bool enabled=std::string(value)=="1" || std::string(value)==" true ";
+        require(diag.active() && diag.backdrop_sampler==enabled && diag.backdrop_sampler_enabled()==enabled
+            && diag.describe()==std::string("[vr] diagnostic overrides: backdrop_sampler=")+(enabled?"1":"0"));
+    }
+    for(const char* bad:{"","  ","maybe","2","-1","0.5","1x","nan"}) {
+        fake_env["SFX_VR_BACKDROP_SAMPLER"]=bad;diag=diagnostic_overrides(fake_getenv);
+        require(!diag.active() && !diag.backdrop_sampler && diag.backdrop_sampler_enabled());
+    }
+    fake_env.clear();
     // Unrelated standard keys do not turn diagnostics on.
     fake_env["SFX_VR_HAPTICS"]="0.5";
     require(!diagnostic_overrides(fake_getenv).active());

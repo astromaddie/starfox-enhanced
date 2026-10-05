@@ -643,6 +643,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::VulkanDrawPackets cabin;
     bool uploaded_cockpit_hud=false;
     starfox::vr::VulkanDrawPackets backgrounds;
+    backgrounds.set_backdrop_sampler(diagnostics.backdrop_sampler_enabled());
     starfox::vr::VulkanDrawPackets tunnel_surround;
     starfox::vr::VulkanDrawPackets surrounding_stars;
     starfox::vr::VulkanDrawPackets startup_panel;
@@ -1776,6 +1777,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                 }
 
             },[&](VkCommandBuffer command,VkExtent2D,const auto&,XrTime) {
+                if(render_game && !backgrounds.record_uploads(command))
+                    throw std::runtime_error("Backdrop upload recording failed");
                 if(ray_ready && !ray_frames[eye]->record_acquire(command)) throw std::runtime_error("Ray shadow acquire failed");
                 if(eye==0 && render_game && !compute_scene_active && (!startup.open || startup.preview) && !scene.record_compute(command))
                     throw std::runtime_error("Live grid compute recording failed");
@@ -1829,6 +1832,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                                 throw std::runtime_error("UI source scene recording failed");
                             if(!sprites.record(command,extent,camera)) throw std::runtime_error("UI source recording failed");
                         }
+                },[&](VkCommandBuffer command,VkExtent2D,const EyeCamera&,XrTime) {
+                    if(!startup.open && !backgrounds.record_uploads(command))
+                        throw std::runtime_error("UI backdrop upload recording failed");
                 });
                 if(result!=StereoRenderer::EyeResult::complete) return result;
                 if(profile_csv.enabled()) ui_frame_profile=ui_draw.take_last_eye_timing();

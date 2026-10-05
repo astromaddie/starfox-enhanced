@@ -2,8 +2,8 @@
 #include "starfox/render/enhanced_backdrop_library.hpp"
 #include "starfox/vr/backdrop_texture.hpp"
 #include <iostream>
-
 int main() try {
+    using namespace starfox;
     using namespace starfox::render;
     for(unsigned i=0;i<enhanced_backdrop_assets.size();++i) {
         // Decode one master at a time; this package check need not retain the
@@ -18,6 +18,15 @@ int main() try {
         const auto texture=starfox::vr::make_backdrop_texture(image);
         if(!starfox::vr::backdrop_texture_valid(*texture,image.width,image.height))
             throw std::runtime_error("Invalid photographic mip pyramid");
+        const auto uploads=starfox::vr::backdrop_mip_uploads(*texture);
+        uint64_t offset=uint64_t((*texture)[4])*4;unsigned w=image.width,h=image.height;
+        for(const auto& level:uploads) {
+            if(level.width!=w || level.height!=h || level.byte_offset!=offset || offset%4)
+                throw std::runtime_error("Invalid backdrop image copy region");
+            offset+=uint64_t(w)*h*4;w=std::max(1U,w/2);h=std::max(1U,h/2);
+        }
+        if(uploads.back().width!=1 || uploads.back().height!=1 || offset!=texture->size()*4)
+            throw std::runtime_error("Incomplete backdrop image mip chain");
         if(i==0) {
             const auto panorama=starfox::vr::make_landscape_texture(image,false,false,8);
             const auto overlap=std::max(1U,image.width/8);

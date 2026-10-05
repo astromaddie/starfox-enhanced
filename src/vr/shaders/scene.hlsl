@@ -182,6 +182,8 @@ float4 fragment_main(Fragment input) : SV_Target0 {
     return styled_colour(input.color);
 }
 [[vk::binding(0,0)]] StructuredBuffer<uint> texels;
+[[vk::binding(1,0),vk::combinedImageSampler]] Texture2D<float4> backdrop_image;
+[[vk::binding(1,0),vk::combinedImageSampler]] SamplerState backdrop_sampler;
 #include "connected_grid.hlsli"
 // Tile payload: 16 control words, 256 RGBA palette words, then packed 64KiB
 // VRAM. Controls: character/screen bases (words), screen size, signed scroll
@@ -863,15 +865,16 @@ float3 cloud_shade(Fragment input,uint shade) {
 float3 nebula_shade(Fragment input,uint bank,uint shade) {
     return shade>=7?float3(0,0,0):cloud_shade(input,1+bank*7+shade);
 }
-float4 backdrop_filtered(float2 uv,float2 size) {
+float4 backdrop_filtered(float2 uv,float2 size,bool sampled) {
     // Perspective-correct derivatives select an immutable mip pyramid. Native
     // source textures retain their original affine, nearest-sampled path.
     float footprint=max(length(ddx(uv)*size),length(ddy(uv)*size));
     float level=clamp(log2(max(footprint,1.)),0.,float(texels[1]-1));
+    if(sampled) return backdrop_image.SampleLevel(backdrop_sampler,uv,level);
     uint low=uint(floor(level)),high=min(low+1,texels[1]-1);
     return lerp(backdrop_level(low,uv),backdrop_level(high,uv),frac(level));
 }
-float4 backdrop_colour(Fragment input) {
+float4 backdrop_colour(Fragment input,bool sampled) {
     float2 uv=input.perspective_uv,size=float2(input.texture.yz+1);
     float4 colour;
     if(uint(input.odd_color.w)==4) {
@@ -888,14 +891,16 @@ float4 backdrop_colour(Fragment input) {
         float2 cap_uv=.5+disk*.46;
         cap_uv.y=(1.+2.*cap_uv.y)/3.;
         float cap=smoothstep(.08,.18,-latitude);
-        colour=lerp(backdrop_filtered(limb_uv,size),backdrop_filtered(cap_uv,size),cap);
+        colour=lerp(backdrop_filtered(limb_uv,size,sampled),backdrop_filtered(cap_uv,size,sampled),cap);
         colour*=1.-smoothstep(.025,.08,latitude);
     }
-    else colour=backdrop_filtered(uv,size);
+    else colour=backdrop_filtered(uv,size,sampled);
     // A 1x1 mip cannot retain two different pole radiances. Clamped poles use
     // their prepared, uniform master row independently of the footprint.
-    if((uint(input.odd_color.w)&1)!=0 && uv.y<=0) colour=backdrop_pixel(0,int2(0,0));
-    else if((uint(input.odd_color.w)&2)!=0 && uv.y>=1) colour=backdrop_pixel(0,int2(0,int(texels[6])-1));
+    if((uint(input.odd_color.w)&1)!=0 && uv.y<=0)
+        colour=sampled?backdrop_image.Load(int3(0,0,0)):backdrop_pixel(0,int2(0,0));
+    else if((uint(input.odd_color.w)&2)!=0 && uv.y>=1)
+        colour=sampled?backdrop_image.Load(int3(0,int(texels[6])-1,0)):backdrop_pixel(0,int2(0,int(texels[6])-1));
     if(colour.a<=0) discard;
     colour.rgb/=colour.a; // Pyramid is premultiplied: no coloured alpha fringes.
     if(input.cloud0.x==1) {
@@ -942,7 +947,7 @@ float4 backdrop_colour(Fragment input) {
 }
 float4 fragment_textured_raw(Fragment input) {
     if(input.visible==0) discard;
-    if((input.texture.w&8193U)==8193U) return backdrop_colour(input);
+    if((input.texture.w&8193U)==8193U) return backdrop_colour(input,false);
     if((input.texture.w&8388608U)!=0) {
         // Resident source textures retain byte indices, not expanded RGBA.
         // UV interpolation remains affine, matching the existing model path.
@@ -1087,4 +1092,8 @@ float4 fragment_textured_raw(Fragment input) {
 }
 float4 fragment_textured_main(Fragment input) : SV_Target0 {
     return styled_colour(fragment_textured_raw(input));
+}
+float4 fragment_backdrop_main(Fragment input) : SV_Target0 {
+    if(input.visible==0) discard;
+    return styled_colour(backdrop_colour(input,true));
 }

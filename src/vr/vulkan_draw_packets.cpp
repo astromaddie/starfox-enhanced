@@ -28,7 +28,7 @@ struct VulkanDrawPackets::State {
     std::size_t reused{},uploaded{};
     std::size_t vertex_uploads{},texture_uploads{};
     std::size_t grid_allocations{},grid_reuses{};
-    bool keyed{};
+    bool keyed{},backdrop_sampler{true};
     bool depth_test{true},depth_write{true};
 };
 VulkanDrawPackets::VulkanDrawPackets()=default;
@@ -296,15 +296,19 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
         auto next=std::make_unique<State>();next->items.reserve(packets.size());
         next->device=device;next->get=get;next->pass=pass;
         next->depth_test=depth_test;next->depth_write=depth_write;
+        next->backdrop_sampler=backdrop_sampler_;
         next->keyed=!object_keys.empty();
         const bool compatible=state_ && state_->device==device && state_->get==get && state_->pass==pass;
         if(compatible) next->grid_pipeline=state_->grid_pipeline;
-        if(compatible && state_->depth_test==depth_test && state_->depth_write==depth_write) next->pipelines=state_->pipelines;
+        if(compatible && state_->depth_test==depth_test && state_->depth_write==depth_write
+            && state_->backdrop_sampler==backdrop_sampler_) next->pipelines=state_->pipelines;
         std::unordered_map<uint32_t,const State::Item*> prior;
         std::unordered_map<const std::vector<uint32_t>*,std::shared_ptr<VulkanSceneTextures>> shared_images;
+        std::unordered_map<const std::vector<uint32_t>*,std::shared_ptr<VulkanSceneTextures>> sampled_images;
         if(compatible) for(const auto& item:state_->items)
             if(!item.geometry->grid && item.geometry->source.geometry.shared_texels)
-                shared_images.emplace(item.geometry->source.geometry.shared_texels.get(),item.geometry->textures);
+                (item.geometry->textures->sampled_backdrop()?sampled_images:shared_images)
+                    .emplace(item.geometry->source.geometry.shared_texels.get(),item.geometry->textures);
         if(compatible && next->keyed && state_->keyed) {
             prior.reserve(state_->items.size());
             for(const auto& item:state_->items) prior.emplace(item.key,&item);
@@ -316,6 +320,9 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
             const auto vertices=mesh.vertex_view();
             const auto texture_words=mesh.texel_view();
             if(vertices.empty() && mesh.line_view().empty()) continue;
+            const bool photograph=!vertices.empty() && (vertices.front().texture[3]&backdrop_texture_flag)==backdrop_texture_flag;
+            const bool sampled_backdrop=photograph && backdrop_sampler_;
+            auto& images=sampled_backdrop?sampled_images:shared_images;
             const auto index=next->items.size();
             const uint32_t key=next->keyed?object_keys[packet_index]:0;
             const State::Item* candidate=nullptr;
@@ -323,7 +330,8 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
                 const auto found=prior.find(key);
                 if(found!=prior.end()) candidate=found->second;
             } else if(compatible && !state_->keyed && index<state_->items.size()) candidate=&state_->items[index];
-            if(candidate && same_draw_geometry(std::span<const DrawPacket>(&candidate->geometry->source,1),std::span<const DrawPacket>(&packet,1))) {
+            if(candidate && candidate->geometry->textures->sampled_backdrop()==sampled_backdrop
+                && same_draw_geometry(std::span<const DrawPacket>(&candidate->geometry->source,1),std::span<const DrawPacket>(&packet,1))) {
                 if(candidate->geometry->grid) ++next->grid_reuses;
                 next->items.push_back({packet.model,candidate->geometry,key});++next->reused;continue;
             }
@@ -352,16 +360,17 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
                     if(!item->textures->initialize_external(device,get,item->grid->buffer(),item->grid->size())) throw std::runtime_error(item->textures->status());
                 }
                 ++next->texture_uploads;
-            } else if(candidate && !candidate->geometry->grid && candidate->geometry->source.geometry.same_texels(mesh))
+            } else if(candidate && !candidate->geometry->grid && candidate->geometry->textures->sampled_backdrop()==sampled_backdrop
+                && candidate->geometry->source.geometry.same_texels(mesh))
                 item->textures=candidate->geometry->textures;
-            else if(mesh.shared_texels && shared_images.contains(mesh.shared_texels.get()))
-                item->textures=shared_images.at(mesh.shared_texels.get());
+            else if(mesh.shared_texels && images.contains(mesh.shared_texels.get()))
+                item->textures=images.at(mesh.shared_texels.get());
             else {
                 item->textures=std::make_shared<VulkanSceneTextures>();
-                if(!item->textures->initialize(device,get,memory,texels)) throw std::runtime_error(item->textures->status());
+                if(!item->textures->initialize(device,get,memory,texels,sampled_backdrop)) throw std::runtime_error(item->textures->status());
                 ++next->texture_uploads;
             }
-            if(!item->grid && mesh.shared_texels) shared_images.emplace(mesh.shared_texels.get(),item->textures);
+            if(!item->grid && mesh.shared_texels) images.emplace(mesh.shared_texels.get(),item->textures);
             const auto prior_vertices=candidate?candidate->geometry->source.geometry.vertex_view():std::span<const SceneVertex>{};
             if(candidate && prior_vertices.size()==vertices.size()
                 && (prior_vertices.data()==vertices.data() || std::equal(vertices.begin(),vertices.end(),prior_vertices.begin())))
@@ -392,14 +401,14 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
         // actually present, retaining each pipeline when later packets change.
         for(const auto& item:next->items) {
             auto& pipelines=*next->pipelines;
-            const auto layout=pipelines.layout.layout();
+            const auto layout=item.geometry->textures->sampled_backdrop()?item.geometry->textures->layout():pipelines.layout.layout();
             const auto vertices=item.geometry->source.geometry.vertex_view();
             const bool photograph=!vertices.empty() && (vertices.front().texture[3]&backdrop_texture_flag)==backdrop_texture_flag;
             auto& triangles=photograph?pipelines.photographs:pipelines.triangles;
             auto& ready=photograph?pipelines.photographs_ready:pipelines.triangles_ready;
             if(item.geometry->triangles && !ready) {
                 if(!triangles.initialize(device,get,pass,depth_test,SceneTopology::triangles,layout,
-                    photograph?SceneBlend::alpha:SceneBlend::opaque,cache_,depth_write)) throw std::runtime_error(triangles.status());
+                    photograph?SceneBlend::alpha:SceneBlend::opaque,cache_,depth_write,item.geometry->textures->sampled_backdrop())) throw std::runtime_error(triangles.status());
                 ready=true;
             }
             if(item.geometry->lines && !pipelines.lines_ready) {
@@ -418,6 +427,12 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
 bool VulkanDrawPackets::record(VkCommandBuffer commands,VkExtent2D extent,const EyeCamera& camera) const {
     return record_range(commands,extent,camera,0,size());
 }
+bool VulkanDrawPackets::record_uploads(VkCommandBuffer commands) const {
+    if(!commands) return false;
+    if(!state_) return true;
+    for(const auto& item:state_->items) if(!item.geometry->textures->record_upload(commands)) return false;
+    return true;
+}
 bool VulkanDrawPackets::record_compute(VkCommandBuffer commands) const {
     if(!state_ || !commands) return false;
     for(const auto& item:state_->items) if(item.geometry->grid && !item.geometry->grid->record(commands)) return false;
@@ -432,7 +447,8 @@ bool VulkanDrawPackets::record_range(VkCommandBuffer commands,VkExtent2D extent,
     if(!state_ || !commands || !extent.width || !extent.height) return false;
     if(first>state_->items.size() || count>state_->items.size()-first) return false;
     const auto items=std::span(state_->items).subspan(first,count);
-    for(const auto& item:items) if(!model_eye_camera(camera,item.model) || (item.geometry->grid && !item.geometry->grid->prepared())) return false;
+    for(const auto& item:items) if(!model_eye_camera(camera,item.model) || !item.geometry->textures->ready()
+        || (item.geometry->grid && !item.geometry->grid->prepared())) return false;
     for(const auto& item:items) {
         const auto& geometry=*item.geometry;
         auto draw_camera=camera;

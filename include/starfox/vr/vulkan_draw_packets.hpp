@@ -6,7 +6,8 @@ namespace starfox::vr {
 // Immutable GPU geometry with replaceable model transforms. Keep alive until
 // both eyes' fences complete. Successful
 // replacement/close also requires completed GPU use; failed initialization
-// preserves the previous scene. No uploads or allocations during record().
+// preserves the previous scene. record_uploads runs outside the render pass,
+// on the draw queue before the first draw. No uploads or allocations during record().
 class VulkanDrawPackets {
 public:
     struct RaySource {VkDescriptorBufferInfo vertices{};uint32_t count{};Matrix4 model{};};
@@ -20,6 +21,10 @@ public:
     VulkanDrawPackets& operator=(const VulkanDrawPackets&)=delete;
     // Borrowed render-thread cache; must outlive initialization calls.
     void set_pipeline_cache(VulkanPipelineCache* cache) noexcept {cache_=cache;}
+    // Launch diagnostic; set before initialize. Ordinary packets keep their
+    // storage-only layout. False also avoids allocating backdrop images.
+    void set_backdrop_sampler(bool enabled) noexcept {backdrop_sampler_=enabled;}
+    bool record_uploads(VkCommandBuffer) const;
     bool initialize(VkDevice,PFN_vkGetDeviceProcAddr,const VkPhysicalDeviceMemoryProperties&,
         VkRenderPass,std::span<const DrawPacket>,std::span<const uint32_t> object_keys={},
         bool depth_test=true,bool depth_write=true);
@@ -56,6 +61,7 @@ public:
     const std::string& status() const noexcept {return status_;}
 private:
     VulkanPipelineCache* cache_{};
+    bool backdrop_sampler_{true};
     struct State;
     std::unique_ptr<State> state_;
     std::string status_{"Draw packets not initialized"};

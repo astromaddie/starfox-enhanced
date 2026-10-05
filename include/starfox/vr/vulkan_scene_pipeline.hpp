@@ -47,7 +47,7 @@ public:
     VulkanScenePipeline& operator=(const VulkanScenePipeline&)=delete;
     bool initialize(VkDevice,PFN_vkGetDeviceProcAddr,VkRenderPass,bool depth_test=false,
         SceneTopology topology=SceneTopology::triangles,VkDescriptorSetLayout textures=VK_NULL_HANDLE,
-        SceneBlend blend=SceneBlend::opaque,VulkanPipelineCache* cache=nullptr,bool depth_write=true);
+        SceneBlend blend=SceneBlend::opaque,VulkanPipelineCache* cache=nullptr,bool depth_write=true,bool backdrop_sampler=false);
     void close() noexcept;
     // SFX_VR_VISIBILITY_MASK: pipelines created afterwards for this render pass
     // that would not depth-test (the ordered sky, sprite and overlay layers)

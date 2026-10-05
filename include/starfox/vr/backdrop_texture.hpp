@@ -31,6 +31,18 @@ inline bool backdrop_texture_valid(std::span<const uint32_t> words,
     return false;
 }
 
+struct BackdropMipUpload {uint64_t byte_offset;uint32_t width,height;};
+inline std::vector<BackdropMipUpload> backdrop_mip_uploads(std::span<const uint32_t> words) {
+    if(words.size()<7 || !backdrop_texture_valid(words,words[5],words[6]))
+        throw std::invalid_argument("Invalid backdrop mip upload");
+    std::vector<BackdropMipUpload> levels;levels.reserve(words[1]);
+    for(unsigned level=0;level<words[1];++level) {
+        const auto record=4+3*level;
+        levels.push_back({uint64_t(words[record])*sizeof(uint32_t),words[record+1],words[record+2]});
+    }
+    return levels;
+}
+
 // Immutable, premultiplied RGBA pyramid. Only rebuild when artwork changes;
 // brightness, live palette response and camera state belong to draw parameters.
 inline std::shared_ptr<const std::vector<uint32_t>> make_backdrop_texture(

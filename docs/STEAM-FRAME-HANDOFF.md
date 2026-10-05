@@ -947,6 +947,7 @@ range. An override wins over the saved preference and is never written to
 | `SFX_VR_OVERLAP_EYES` | `1` submits eye 1 straight after eye 0 instead of waiting for eye 0's fence (see "Overlapped eye submission" below). Default off, which keeps the serial eye loop. Not a registry key. Added October 4 |
 | `SFX_VR_VISIBILITY_MASK` | `1` fetches each eye's hidden-area mesh through `XR_KHR_visibility_mask` and draws it first in the eye pass, so nothing is shaded where the lenses never look (see "Visibility mask" below). Default off, which leaves the pipelines and the eye pass unchanged. Ignored, with a log line, when the runtime lacks the extension. Not a registry key. Added October 5 |
 | `SFX_VR_ENHANCED_SKY` | `0`/`1` overrides the saved Enhanced Sky choice for this launch only. The 2D OPTIONS row shows `OFF ENV`/`ON ENV` and cannot be changed while overridden. Unset or invalid keeps the saved choice; preferences are never changed. Logs as `enhanced_sky=0`/`1` in the diagnostic overrides line. Not a registry key. Added October 5 |
+| `SFX_VR_BACKDROP_SAMPLER` | `0` uses the original storage-buffer trilinear backdrop filter; `1` uses an RGBA8 UNORM mip image and hardware trilinear sampler. Defaults on when unset or invalid. Launch-only A/B diagnostic; does not change the Enhanced Sky preference. Logs as `backdrop_sampler=0`/`1`. |
 
 No other registry key is implemented by this port, so no other variable has any
 effect.
@@ -1689,3 +1690,44 @@ then cockpit and HUD once the cockpit is up (0.1–0.5). Models, the compute sce
 are small (≤0.13), and sprites are about 0. The user's saved settings have
 Enhanced Sky on. Next optimisation target: the sky and background path
 (including Enhanced Sky), then the cabin.
+
+
+### Enhanced Sky A/B (October 5)
+
+`a084a0d` ran unattended on LEVEL1_1: 120 Hz, 2160² eyes, visibility mask on, two
+90 s runs with `SFX_VR_ENHANCED_SKY=1` and then `=0`. Logs:
+`build/frame-devkit/runs/a084a0d-forced-LEVEL1_1-sky{1,0}-mask.log`.
+
+| Enhanced Sky | GPU per frame (both eyes) | Mean of windows 4–8 | fps per 10 s window |
+| --- | --- | --- | --- |
+| on | 12.5–18.2 ms | 16.4 ms | 41–60 |
+| off | 12.4–19.1 ms | 17.4 ms | 40–59 |
+
+Turning Enhanced Sky off doesn't help on Corneria. It's about 6% slower in the busy
+part of the level, because the native tile backgrounds come back and their shader
+(bitplane decode per pixel) costs more than the photographs. The `sky` segment is
+0.22–0.23 in both runs. Enhanced Sky stays on by default. The hardware-sampled
+backdrop (proposal 1 in `docs/VR-SKY-GPU-ANALYSIS.md`) only works on the
+photograph share of that segment, so expect a few percent of eye time, not a big
+step. The bigger levers are still pixel count (foveation or resolution) and the
+cabin and HUD.
+
+### Hardware-sampled backdrops (October 5)
+
+Untested on the device. The host build and its tests pass.
+
+Photographic backdrops are now sampled from an RGBA8 UNORM image that holds the
+same premultiplied pyramid as the storage buffer, as its mips. A LINEAR/LINEAR/
+LINEAR sampler (U repeat when the artwork wraps, otherwise clamp) uses
+`SampleLevel` at the level the old code picked. One texture fetch replaces eight
+buffer reads, or sixteen on orbital surfaces. Pole rows still come from mip 0
+(`Load`). The storage buffer stays as the upload source and for the header words.
+Only backdrop packets get the second descriptor binding and the
+`fragment_backdrop_main` entry point. Everything else keeps its layout.
+`backgrounds.record_uploads()` copies new images before the eye or UI pass that
+first draws them.
+
+`SFX_VR_BACKDROP_SAMPLER=0` keeps the old manual filter for an A/B. On the
+headset, check for seams at the wrap, poles, transparent edges, mip transitions
+and the orbital limb/cap blend. Expect only a few percent of eye time (see the
+Enhanced Sky A/B above).

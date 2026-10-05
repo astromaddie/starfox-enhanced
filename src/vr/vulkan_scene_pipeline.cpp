@@ -23,7 +23,7 @@ void VulkanScenePipeline::close() noexcept {
     if(layout_) destroy_layout_(device_,layout_,nullptr);
     pipeline_={};layout_={};device_={};near_depth_=false;
 }
-bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,VkRenderPass pass,bool depth_test,SceneTopology topology,VkDescriptorSetLayout textures,SceneBlend mode,VulkanPipelineCache* cache,bool depth_write) {
+bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,VkRenderPass pass,bool depth_test,SceneTopology topology,VkDescriptorSetLayout textures,SceneBlend mode,VulkanPipelineCache* cache,bool depth_write,bool backdrop_sampler) {
     close();
     std::array<VkShaderModule,2> modules{};
     PFN_vkDestroyShaderModule destroy_shader{};
@@ -34,6 +34,7 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
             throw std::runtime_error("Invalid scene topology");
         topology_=topology;
         textured_=textures!=VK_NULL_HANDLE;
+        if(backdrop_sampler && !textured_) throw std::runtime_error("Missing backdrop texture layout");
         const bool mask=mode==SceneBlend::visibility_mask;
         // Masked ordered layers test at depth 0 so only the mask's 0 rejects them.
         const bool masked_layer=!mask && !depth_test && masked_pass_ && pass==masked_pass_;
@@ -59,8 +60,8 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
         module.pCode=textured_?shader::vertex_textured:shader::vertex;
         check(create_shader(device,&module,nullptr,&modules[0]),"Create vertex shader");
         if(!mask) {
-            module.codeSize=textured_?sizeof(shader::fragment_textured):sizeof(shader::fragment);
-            module.pCode=textured_?shader::fragment_textured:shader::fragment;
+            module.codeSize=backdrop_sampler?sizeof(shader::fragment_backdrop):textured_?sizeof(shader::fragment_textured):sizeof(shader::fragment);
+            module.pCode=backdrop_sampler?shader::fragment_backdrop:textured_?shader::fragment_textured:shader::fragment;
             check(create_shader(device,&module,nullptr,&modules[1]),"Create fragment shader");
         }
         VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(SceneConstants)};
@@ -72,7 +73,7 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
         std::array<VkPipelineShaderStageCreateInfo,2> stages{};
         for(auto& stage:stages) stage.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT;stages[0].module=modules[0];stages[0].pName=textured_?"vertex_textured_main":"vertex_main";
-        stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT;stages[1].module=modules[1];stages[1].pName=textured_?"fragment_textured_main":"fragment_main";
+        stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT;stages[1].module=modules[1];stages[1].pName=backdrop_sampler?"fragment_backdrop_main":textured_?"fragment_textured_main":"fragment_main";
         VkVertexInputBindingDescription binding{0,sizeof(SceneVertex),VK_VERTEX_INPUT_RATE_VERTEX};
         std::array<VkVertexInputAttributeDescription,15> attributes{{
             {0,0,VK_FORMAT_R32G32B32_SFLOAT,offsetof(SceneVertex,position)},

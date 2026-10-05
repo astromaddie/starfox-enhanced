@@ -60,15 +60,19 @@ inline std::optional<bool> env_override_bool(const char* key,
 // eye's hidden area with XR_KHR_visibility_mask. Unset or unparseable leaves
 // each one off. enhanced_sky (SFX_VR_ENHANCED_SKY, 0/1, not a registry
 // key) overrides the saved sky choice and locks its menu row for this launch.
+// backdrop_sampler (SFX_VR_BACKDROP_SAMPLER, 0/1) selects hardware filtering;
+// unset or invalid leaves it on. It never changes the Enhanced Sky preference.
 // timing_gpu (SFX_VR_TIMING_GPU) is a standard
 // key, but it also adds the eye pass segment timestamps, so it shows here too.
 struct DiagnosticOverrides {
     bool force_render{},overlap_eyes{},timing_gpu{},visibility_mask{};
     float yaw_degrees{};
     std::optional<bool> enhanced_sky;
+    std::optional<bool> backdrop_sampler;
+    bool backdrop_sampler_enabled() const noexcept {return backdrop_sampler.value_or(true);}
     std::optional<std::string> autostart;
     std::optional<float> exit_after_seconds;
-    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes || timing_gpu || visibility_mask || enhanced_sky;}
+    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes || timing_gpu || visibility_mask || enhanced_sky || backdrop_sampler;}
     std::string describe() const {
         std::ostringstream line;line<<"[vr] diagnostic overrides:";
         if(force_render) line<<" force_render=1";
@@ -79,6 +83,7 @@ struct DiagnosticOverrides {
         if(timing_gpu) line<<" timing_gpu=1";
         if(visibility_mask) line<<" visibility_mask=1";
         if(enhanced_sky) line<<" enhanced_sky="<<int(*enhanced_sky);
+        if(backdrop_sampler) line<<" backdrop_sampler="<<int(*backdrop_sampler);
         return line.str();
     }
 };
@@ -93,6 +98,7 @@ inline DiagnosticOverrides diagnostic_overrides(EnvGetter getter=process_getenv)
     result.timing_gpu=env_override_bool("timing_gpu",getter).value_or(false);
     result.visibility_mask=env_override_bool("visibility_mask",getter).value_or(false);
     result.enhanced_sky=env_override_bool("enhanced_sky",getter);
+    result.backdrop_sampler=env_override_bool("backdrop_sampler",getter);
     return result;
 }
 }
