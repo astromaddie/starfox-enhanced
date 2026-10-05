@@ -1662,3 +1662,29 @@ then with `SFX_VR_VISIBILITY_MASK=1`, both with `SFX_VR_TIMING_GPU=1`, and compa
 `gpu_eyes`, `passes=`, fps and missed. Look for the `[vr] Visibility mask` line.
 Worn, check that nothing is visibly missing at the edge of the view.
 
+
+### Visibility mask and per-pass A/B (October 5)
+
+`3c6aab6` ran unattended on LEVEL1_1, with the system display now at 120 Hz and
+the runtime recommending 2160x2160 at 100%. There were four 90 s runs. Logs:
+`build/frame-devkit/runs/3c6aab6-forced-LEVEL1_1-90hz-mask{off,on}-{1.0,0.75}.log`.
+The mask loaded 13 hidden triangles per eye, with no errors.
+
+| Eye buffers | Mask | GPU per frame (both eyes) | fps per 10 s window |
+| --- | --- | --- | --- |
+| 2160² | off | 13.9–20.4 ms | 39–58 |
+| 2160² | on | 12.5–18.2 ms | 41–60 |
+| 1620² (75%) | off | 8.8–12.8 ms | 58–68, then a steady 60 |
+| 1620² (75%) | on | 7.6–11.5 ms | 60–87, then a steady 60 |
+
+The mask cuts GPU time by about 8–10%, close to its 15.6% pixel share once the
+whole-image tile cost is counted. It still needs a worn check of the view edges
+before it's on by default. Forced runs use synthetic projections, so the mask
+isn't aligned there.
+
+The pass segments are tile-coarse (one tile's values), so read them as
+proportions. Sky and backgrounds are the largest share in every run (0.2–0.8),
+then cockpit and HUD once the cockpit is up (0.1–0.5). Models, the compute scene,
+are small (≤0.13), and sprites are about 0. The user's saved settings have
+Enhanced Sky on. Next optimisation target: the sky and background path
+(including Enhanced Sky), then the cabin.
