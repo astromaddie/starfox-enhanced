@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <optional>
+#include <utility>
 namespace starfox::vr {
 // Adapter retained for the lifetime of the frame driver. Commands/targets
 // outlive it. Only this adapter may submit work on its command objects.
@@ -31,6 +32,10 @@ public:
     // Ends a GPU timing segment of the eye being recorded (see VulkanEyeCommands::mark).
     void mark(VkCommandBuffer command,unsigned index) noexcept {if(recording_) recording_->mark(command,index);}
     using Record=std::function<void(VkCommandBuffer,VkExtent2D,const EyeCamera&,XrTime)>;
+    // Recorded first inside every eye pass, before draw()'s record (the
+    // SFX_VR_VISIBILITY_MASK hidden-area draw). Empty records nothing.
+    using Prologue=std::function<void(VkCommandBuffer,VkExtent2D,unsigned eye,const EyeCamera&)>;
+    void set_prologue(Prologue prologue) {prologue_=std::move(prologue);}
     VulkanStereoDraw(VulkanEyeCommands& commands,const VulkanEyeTargets& targets,VulkanEyeCommands* right=nullptr)
         :targets_(targets),slots_{{{&commands},{right}}} {}
     // overlap (needs the second command object) returns submitted straight
@@ -50,5 +55,6 @@ private:
     CompletionTiming timing_{};
     EyeTiming last_eye_timing_{};
     VulkanEyeCommands* recording_{};
+    Prologue prologue_;
 };
 }

@@ -74,6 +74,7 @@ target_sources(starfox_vr_core PRIVATE src/vr/shape_mesh.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/shape_bsp.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/game_model_pose.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/openxr_input.cpp src/vr/refresh_rate.cpp)
+target_sources(starfox_vr_core PRIVATE src/vr/visibility_mask.cpp src/vr/vulkan_visibility_mask.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/scene_material.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/shape_batch.cpp src/render/face_material.cpp)
 target_compile_features(starfox_vr_core PUBLIC cxx_std_20)
@@ -195,6 +196,8 @@ if(NOT ANDROID)
     target_link_libraries(starfox_vr_input_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_standard_check tests/vr_standard_tests.cpp)
     target_link_libraries(starfox_vr_standard_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_visibility_mask_check tests/vr_visibility_mask_tests.cpp)
+    target_link_libraries(starfox_vr_visibility_mask_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_cockpit_geometry_check tests/vr_cockpit_geometry_tests.cpp)
     target_link_libraries(starfox_vr_cockpit_geometry_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_cockpit_input_check tests/vr_cockpit_input_tests.cpp)
@@ -271,7 +274,7 @@ if(NOT ANDROID)
         # Keep hardware runtime/scene probes separate from unattended CTest.
         foreach(vr_check IN ITEMS
             starfox_vr_application_tests starfox_vr_runtime_tests
-            starfox_vr_audio_check starfox_vr_input_check starfox_vr_standard_check
+            starfox_vr_audio_check starfox_vr_input_check starfox_vr_standard_check starfox_vr_visibility_mask_check
             starfox_vr_packet_check starfox_vr_decal_check starfox_vr_cockpit_input_check starfox_vr_cockpit_geometry_check starfox_vr_cache_check
             starfox_vr_session_check starfox_vr_swapchain_check
             starfox_vr_camera_check starfox_vr_device_check

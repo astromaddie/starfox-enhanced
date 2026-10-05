@@ -21,7 +21,7 @@ void OpenXrSession::close() noexcept {
     if(session_!=XR_NULL_HANDLE) api_.destroy_session(session_);
     instance_=XR_NULL_HANDLE;session_=XR_NULL_HANDLE;space_=XR_NULL_HANDLE;
     running_=exit_=frame_active_=renderable_=exit_asked_=forced_=false;
-    state_=XR_SESSION_STATE_UNKNOWN;frame_time_=0;
+    state_=XR_SESSION_STATE_UNKNOWN;frame_time_=0;mask_changes_=0;
     origin_changes_.clear();
 }
 bool OpenXrSession::initialize(XrInstance instance,XrSystemId system,const void* binding) {
@@ -62,6 +62,12 @@ bool OpenXrSession::poll_events() {
                 const auto& change=*reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&event);
                 if(change.session==session_ && change.referenceSpaceType==XR_REFERENCE_SPACE_TYPE_LOCAL)
                     origin_changes_.push_back(change.changeTime);
+                continue;
+            }
+            if(event.type==XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR) {
+                const auto& change=*reinterpret_cast<const XrEventDataVisibilityMaskChangedKHR*>(&event);
+                if(change.session==session_ && change.viewConfigurationType==XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO
+                    && change.viewIndex<2) mask_changes_|=1U<<change.viewIndex;
                 continue;
             }
             if(event.type!=XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) continue;

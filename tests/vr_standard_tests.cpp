@@ -211,6 +211,12 @@ void diagnostic_env() {
     fake_env["SFX_VR_TIMING_GPU"]="1";diag=diagnostic_overrides(fake_getenv);
     require(diag.active() && diag.timing_gpu && diag.describe()=="[vr] diagnostic overrides: timing_gpu=1");
     fake_env["SFX_VR_TIMING_GPU"]="0";require(!diagnostic_overrides(fake_getenv).active());
+    // SFX_VR_VISIBILITY_MASK alone turns the line on; off or junk leaves it off.
+    fake_env["SFX_VR_VISIBILITY_MASK"]="1";diag=diagnostic_overrides(fake_getenv);
+    require(diag.active() && diag.visibility_mask && diag.describe()=="[vr] diagnostic overrides: visibility_mask=1");
+    for(const char* off:{"0","maybe",""}) {
+        fake_env["SFX_VR_VISIBILITY_MASK"]=off;require(!diagnostic_overrides(fake_getenv).visibility_mask);
+    }
     fake_env["SFX_VR_FORCE_RENDER"]="1";fake_env["SFX_VR_DIAG_YAW"]="90";
     fake_env["SFX_VR_AUTOSTART"]=" LEVEL1_1 ";fake_env["SFX_VR_EXIT_AFTER"]="60";
     diag=diagnostic_overrides(fake_getenv);

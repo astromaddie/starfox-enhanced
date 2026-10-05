@@ -4,6 +4,8 @@
 #include "starfox/vr/vulkan_scene_pipeline.hpp"
 #include "starfox/vr/vulkan_scene_buffer.hpp"
 #include "starfox/vr/scene_material.hpp"
+#include "starfox/vr/vulkan_visibility_mask.hpp"
+#include <map>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -32,6 +34,14 @@ unsigned shader_destroys{},draws{};
 VkPrimitiveTopology expected_topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 unsigned expected_vertex_count=3;
 bool expected_depth_test=false,expected_depth_write=false;
+// Per created pipeline: fragment stage present and colour writes, so a draw
+// can be told apart as the depth-only visibility mask.
+struct PipelineInfo {uint32_t stages{};VkColorComponentFlags colour{};};
+std::map<uintptr_t,PipelineInfo> pipelines_made;
+uintptr_t bound_pipeline{};
+float last_max_depth=-1;
+struct DrawRecord {uint32_t stages{};float max_depth{};bool in_pass{};uint32_t count{};};
+std::vector<DrawRecord> drawn;
 std::array<unsigned char,1024> uploaded{};
 unsigned flushes{},unmaps{},buffers_destroyed{},memory_freed{};
 bool fail_flush{};
@@ -65,19 +75,27 @@ VKAPI_ATTR VkResult VKAPI_CALL create_layout(VkDevice,const VkPipelineLayoutCrea
 }
 VKAPI_ATTR void VKAPI_CALL destroy_layout(VkDevice,VkPipelineLayout,const VkAllocationCallbacks*) {}
 VKAPI_ATTR VkResult VKAPI_CALL create_pipeline(VkDevice,VkPipelineCache,uint32_t count,const VkGraphicsPipelineCreateInfo* info,const VkAllocationCallbacks*,VkPipeline* out) {
-    require(count==1 && info->stageCount==2 && info->pVertexInputState->vertexAttributeDescriptionCount==15);
+    require(count==1 && info->stageCount>=1 && info->stageCount<=2 && info->pVertexInputState->vertexAttributeDescriptionCount==15);
     require(info->pDynamicState->dynamicStateCount==2 && info->pInputAssemblyState->topology==expected_topology);
     require(bool(info->pDepthStencilState->depthTestEnable)==expected_depth_test
         && bool(info->pDepthStencilState->depthWriteEnable)==expected_depth_write);
-    *out=handle<VkPipeline>(1);return VK_SUCCESS;
+    require(info->pDepthStencilState->depthCompareOp==VK_COMPARE_OP_LESS && info->pStages[0].stage==VK_SHADER_STAGE_VERTEX_BIT);
+    static uintptr_t next=1;
+    pipelines_made[next]={info->stageCount,info->pColorBlendState->pAttachments[0].colorWriteMask};
+    *out=handle<VkPipeline>(next++);return VK_SUCCESS;
 }
 VKAPI_ATTR void VKAPI_CALL destroy_pipeline(VkDevice,VkPipeline,const VkAllocationCallbacks*) {}
-VKAPI_ATTR void VKAPI_CALL bind_pipeline(VkCommandBuffer,VkPipelineBindPoint,VkPipeline) {}
+VKAPI_ATTR void VKAPI_CALL bind_pipeline(VkCommandBuffer,VkPipelineBindPoint,VkPipeline pipeline) {bound_pipeline=reinterpret_cast<uintptr_t>(pipeline);}
 VKAPI_ATTR void VKAPI_CALL bind_vertices(VkCommandBuffer,uint32_t,uint32_t,const VkBuffer*,const VkDeviceSize*) {}
 VKAPI_ATTR void VKAPI_CALL push(VkCommandBuffer,VkPipelineLayout,VkShaderStageFlags,uint32_t,uint32_t size,const void*) {require(size==sizeof(SceneConstants));}
-VKAPI_ATTR void VKAPI_CALL viewport(VkCommandBuffer,uint32_t,uint32_t,const VkViewport* view) {require(view->width==100 && view->height==200);}
+VKAPI_ATTR void VKAPI_CALL viewport(VkCommandBuffer,uint32_t,uint32_t,const VkViewport* view) {
+    require(view->width==100 && view->height==200 && view->minDepth==0);last_max_depth=view->maxDepth;
+}
 VKAPI_ATTR void VKAPI_CALL scissor(VkCommandBuffer,uint32_t,uint32_t,const VkRect2D*) {}
-VKAPI_ATTR void VKAPI_CALL draw_scene(VkCommandBuffer,uint32_t count,uint32_t instances,uint32_t,uint32_t) {require(count==expected_vertex_count && instances==1);++draws;}
+VKAPI_ATTR void VKAPI_CALL draw_scene(VkCommandBuffer,uint32_t count,uint32_t instances,uint32_t,uint32_t) {
+    require(count==expected_vertex_count && instances==1);++draws;
+    drawn.push_back({pipelines_made[bound_pipeline].stages,last_max_depth,inside_pass,count});
+}
 VKAPI_ATTR VkResult VKAPI_CALL create_pool(VkDevice,const VkCommandPoolCreateInfo* info,const VkAllocationCallbacks*,VkCommandPool* out) {
     require(info->queueFamilyIndex==2);*out=handle<VkCommandPool>(1);return VK_SUCCESS;
 }
@@ -344,6 +362,73 @@ int main(int argc,char** argv) try {
         require(serial.draw(1,1,camera,125,clear)==Eye::fatal);
         blocked_fences.clear();
         require(serial.draw(0,0,camera,125,clear)==Eye::complete);
+    }
+    {
+        // SFX_VR_VISIBILITY_MASK, pipelines: the mask writes depth only at the
+        // near plane; ordered layers on the masked pass test at depth 0 without
+        // writing; depth-tested and other passes' pipelines are unchanged.
+        const auto device=handle<VkDevice>(1);const auto eye_pass=targets.render_pass(),other_pass=handle<VkRenderPass>(99);
+        const auto made=[&](VkRenderPass pass,bool depth_test,bool test,bool write,SceneBlend blend=SceneBlend::opaque) {
+            expected_depth_test=test;expected_depth_write=write;
+            VulkanScenePipeline pipeline;
+            require(pipeline.initialize(device,get,pass,depth_test,SceneTopology::triangles,VK_NULL_HANDLE,blend));
+            drawn.clear();
+            require(pipeline.record(handle<VkCommandBuffer>(1),{100,200},handle<VkBuffer>(1),3,EyeCamera{}));
+            return std::pair(pipelines_made.rbegin()->second,drawn.back().max_depth);
+        };
+        // Unset (the default): unchanged, the ordered layer neither tests nor writes.
+        auto [layer,depth]=made(eye_pass,false,false,false);
+        require(layer.stages==2 && layer.colour==0xf && depth==1);
+        VulkanScenePipeline::set_visibility_mask_pass(eye_pass);
+        std::tie(layer,depth)=made(eye_pass,false,true,false,SceneBlend::alpha);
+        require(layer.stages==2 && layer.colour==0xf && depth==0);
+        std::tie(layer,depth)=made(eye_pass,true,true,true);
+        require(layer.stages==2 && depth==1);
+        std::tie(layer,depth)=made(other_pass,false,false,false);
+        require(depth==1);
+        std::tie(layer,depth)=made(eye_pass,false,true,true,SceneBlend::visibility_mask);
+        require(layer.stages==1 && layer.colour==0 && depth==0);
+        VulkanScenePipeline::set_visibility_mask_pass(VK_NULL_HANDLE);
+        std::tie(layer,depth)=made(eye_pass,false,false,false);
+        require(depth==1);
+        // The mesh: tangent-space points on z=-1, drawn with the projection alone.
+        VulkanVisibilityMask mask;
+        expected_depth_test=expected_depth_write=true;
+        require(mask.initialize(device,get,eye_pass) && !mask.has_mesh(0) && !mask.has_mesh(1));
+        VkPhysicalDeviceMemoryProperties memory{};memory.memoryTypeCount=1;
+        memory.memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        const std::array<XrVector2f,3> hidden{{{-1,-1},{-.9F,-1},{-1,-.9F}}};
+        require(!mask.upload(0,memory,std::span(hidden).first(2)) && !mask.upload(2,memory,hidden));
+        require(mask.upload(1,memory,hidden) && mask.has_mesh(1) && !mask.has_mesh(0));
+        SceneVertex first{};std::memcpy(&first,uploaded.data(),sizeof first);
+        require(first.position[0]==-1 && first.position[1]==-1 && first.position[2]==-1 && first.texture[3]==0);
+        // Eye passes: the prologue's mask draw is the first draw in the pass;
+        // an eye without a mesh, or no prologue, records no mask draw at all.
+        pending_fence=false;
+        VulkanEyeCommands eyes;
+        require(eyes.initialize(device,handle<VkQueue>(1),2,get));
+        VulkanStereoDraw draw(eyes,targets);
+        EyeCamera camera{};camera.projection[0]=1;VkClearColorValue clear{};
+        VulkanScenePipeline world;expected_depth_test=expected_depth_write=true;
+        require(world.initialize(device,get,eye_pass,true));
+        const VulkanStereoDraw::Record world_draw=[&](VkCommandBuffer command,VkExtent2D extent,const EyeCamera& eye_camera,XrTime) {
+            require(world.record(command,extent,handle<VkBuffer>(1),3,eye_camera));
+        };
+        draw.set_prologue([&](VkCommandBuffer command,VkExtent2D extent,unsigned eye,const EyeCamera& eye_camera) {
+            require(mask.record(command,extent,eye,eye_camera.projection));
+        });
+        drawn.clear();
+        require(draw.draw(1,0,camera,1,clear,world_draw)==StereoRenderer::EyeResult::complete);
+        require(drawn.size()==2 && drawn[0].stages==1 && drawn[0].max_depth==0 && drawn[0].in_pass
+            && drawn[1].stages==2 && drawn[1].max_depth==1 && drawn[1].in_pass);
+        drawn.clear();
+        require(draw.draw(0,0,camera,1,clear,world_draw)==StereoRenderer::EyeResult::complete);
+        require(drawn.size()==1 && drawn[0].stages==2);
+        draw.set_prologue({});drawn.clear();
+        require(draw.draw(1,0,camera,1,clear,world_draw)==StereoRenderer::EyeResult::complete);
+        require(drawn.size()==1 && drawn[0].stages==2);
+        require(mask.upload(1,memory,{}) && !mask.has_mesh(1));
+        mask.close();
     }
     {
         // SFX_VR_TIMING_GPU: the pass start, three marks and the end of record

@@ -11,6 +11,7 @@ StereoRenderer::EyeResult VulkanStereoDraw::draw(unsigned eye,uint32_t image,
         slot.submitted_at=std::chrono::steady_clock::now();
         recording_=&commands;
         const bool queued=commands.submit(targets_,eye,image,clear,[&](VkCommandBuffer command,VkExtent2D extent) {
+            if(prologue_) prologue_(command,extent,eye,camera);
             if(record) record(command,extent,camera,time);
         },[&](VkCommandBuffer command,VkExtent2D extent) {
             if(before_render) before_render(command,extent,camera,time);

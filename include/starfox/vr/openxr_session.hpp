@@ -55,6 +55,9 @@ public:
     // runtime that refuses their layers gets an empty frame instead.
     void set_force_render(bool on) noexcept {force_render_=on;}
     unsigned forced_rejections() const noexcept {return forced_rejections_;}
+    // Primary stereo views whose visibility mask changed since the last call,
+    // one bit per view (XrEventDataVisibilityMaskChangedKHR).
+    unsigned take_visibility_mask_changes() noexcept {auto views=mask_changes_;mask_changes_=0;return views;}
     std::optional<StereoFrame> begin_frame();
     // Submit only completed/released swapchain layers. Invisible/untracked
     // frames always submit zero layers, while retaining frame pacing.
@@ -74,7 +77,7 @@ private:
     XrEnvironmentBlendMode blend_{XR_ENVIRONMENT_BLEND_MODE_OPAQUE};
     bool running_{},exit_{},frame_active_{},renderable_{},exit_asked_{};
     bool force_render_{},forced_{};
-    unsigned forced_rejections_{};
+    unsigned forced_rejections_{},mask_changes_{};
     XrTime frame_time_{};
     std::vector<XrTime> origin_changes_;
     std::string status_{"OpenXR session not initialized"};

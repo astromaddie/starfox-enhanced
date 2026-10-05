@@ -36,7 +36,9 @@ struct SceneVertex {
 // Flat-color triangle/line pass. Input positions are right-handed world coordinates
 // in the same units as EyeCamera. Caller owns vertex buffers and GPU lifetime.
 enum class SceneTopology {triangles,lines};
-enum class SceneBlend {opaque,add,subtract,half_add,half_subtract,shadow,alpha};
+// visibility_mask writes only depth, at 0 (the near plane), with no fragment
+// shader: the hidden-area mesh drawn first in a masked eye pass.
+enum class SceneBlend {opaque,add,subtract,half_add,half_subtract,shadow,alpha,visibility_mask};
 class VulkanScenePipeline {
 public:
     ~VulkanScenePipeline();
@@ -47,6 +49,13 @@ public:
         SceneTopology topology=SceneTopology::triangles,VkDescriptorSetLayout textures=VK_NULL_HANDLE,
         SceneBlend blend=SceneBlend::opaque,VulkanPipelineCache* cache=nullptr,bool depth_write=true);
     void close() noexcept;
+    // SFX_VR_VISIBILITY_MASK: pipelines created afterwards for this render pass
+    // that would not depth-test (the ordered sky, sprite and overlay layers)
+    // test LESS without writing, at depth 0 via a [0,0] viewport depth range.
+    // They then draw everywhere except where the mask wrote 0, exactly as
+    // before; depth-tested pipelines already fail there. Set once, before any
+    // eye pipeline exists; VK_NULL_HANDLE (the default) changes nothing.
+    static void set_visibility_mask_pass(VkRenderPass pass) noexcept {masked_pass_=pass;}
     bool record(VkCommandBuffer,VkExtent2D,VkBuffer,uint32_t vertices,const EyeCamera&,VkDescriptorSet textures=VK_NULL_HANDLE) const;
     // Draw a primitive-aligned subrange without uploading another buffer.
     // total_vertices is the allocation's vertex count, not the requested count.
@@ -57,7 +66,8 @@ public:
     const std::string& status() const noexcept {return status_;}
 private:
     SceneTopology topology_{SceneTopology::triangles};
-    bool textured_{};
+    bool textured_{},near_depth_{};
+    static inline VkRenderPass masked_pass_{};
     PFN_vkCmdBindDescriptorSets bind_descriptors_{};
     VkDevice device_{};VkPipeline pipeline_{};VkPipelineLayout layout_{};
     PFN_vkDestroyPipeline destroy_pipeline_{};

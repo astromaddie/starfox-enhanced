@@ -3,24 +3,28 @@
 #include <iostream>
 #include <stdexcept>
 namespace {
-unsigned creates=0,destroys=0;bool fail_system=false,graphics=true,frame_extension=false;unsigned eye_count=2;
+unsigned creates=0,destroys=0;bool fail_system=false,graphics=true,frame_extension=false,mask_extension=false;unsigned eye_count=2;
 bool change_eye_count=false;
 void check(bool value){if(!value) throw std::runtime_error("OpenXR runtime lifecycle assertion failed");}
 }
 extern "C" {
 XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char*,uint32_t capacity,uint32_t* count,XrExtensionProperties* out) {
-    *count=graphics?(frame_extension?2U:1U):0U;
+    *count=graphics?1U+frame_extension+mask_extension:0U;
     if(capacity && graphics) {
         std::strcpy(out[0].extensionName,"XR_KHR_vulkan_enable2");
         if(frame_extension && capacity>1)
             std::strcpy(out[1].extensionName,"XR_VALVE_frame_controller_interaction");
+        if(mask_extension && capacity>1U+frame_extension)
+            std::strcpy(out[1+frame_extension].extensionName,XR_KHR_VISIBILITY_MASK_EXTENSION_NAME);
     }
     return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo* info,XrInstance* out) {
-    check(info->enabledExtensionCount==(frame_extension?2U:1U)
+    check(info->enabledExtensionCount==1U+frame_extension+mask_extension
         && std::strcmp(info->enabledExtensionNames[0],"XR_KHR_vulkan_enable2")==0);
-    if(frame_extension) check(std::strcmp(info->enabledExtensionNames[1],
+    // Order: Vulkan, refresh rate, visibility mask, Frame controller.
+    if(mask_extension) check(std::strcmp(info->enabledExtensionNames[1],XR_KHR_VISIBILITY_MASK_EXTENSION_NAME)==0);
+    if(frame_extension) check(std::strcmp(info->enabledExtensionNames[1+mask_extension],
         "XR_VALVE_frame_controller_interaction")==0);
     ++creates;*out=reinterpret_cast<XrInstance>(uintptr_t(1));return XR_SUCCESS;
 }
@@ -50,8 +54,13 @@ int main()try {
         check(runtime.instance()==XR_NULL_HANDLE && runtime.views().empty() && !runtime.supports_vulkan());
         change_eye_count=false;check(runtime.initialize());
         frame_extension=true;
-        check(runtime.initialize() && runtime.supports_frame_controller_interaction());
+        check(runtime.initialize() && runtime.supports_frame_controller_interaction() && !runtime.supports_visibility_mask());
+        // XR_KHR_visibility_mask: enabled only when advertised.
+        mask_extension=true;
+        check(runtime.initialize() && runtime.supports_visibility_mask() && runtime.supports_frame_controller_interaction());
+        frame_extension=false;check(runtime.initialize() && runtime.supports_visibility_mask());
+        mask_extension=false;check(runtime.initialize() && !runtime.supports_visibility_mask());
     }
-    check(creates==8 && destroys==8);std::cout<<"OpenXR runtime initialization, optional Frame extension, failure cleanup, reinitialization and destruction passed\n";
+    check(creates==11 && destroys==11);std::cout<<"OpenXR runtime initialization, optional Frame and visibility mask extensions, failure cleanup, reinitialization and destruction passed\n";
     return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

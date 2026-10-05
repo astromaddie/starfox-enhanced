@@ -55,15 +55,17 @@ inline std::optional<bool> env_override_bool(const char* key,
 // rendered head; autostart (SFX_VR_AUTOSTART, e.g. LEVEL1_1) skips the startup
 // menu; exit_after (SFX_VR_EXIT_AFTER, seconds in game, not a registry key)
 // quits through QUIT TO STEAM; overlap_eyes (SFX_VR_OVERLAP_EYES, 0/1, not a
-// registry key) submits eye 1 without waiting for eye 0's fence. Unset or
-// unparseable leaves each one off. timing_gpu (SFX_VR_TIMING_GPU) is a standard
+// registry key) submits eye 1 without waiting for eye 0's fence;
+// visibility_mask (SFX_VR_VISIBILITY_MASK, 0/1, not a registry key) masks each
+// eye's hidden area with XR_KHR_visibility_mask. Unset or unparseable leaves
+// each one off. timing_gpu (SFX_VR_TIMING_GPU) is a standard
 // key, but it also adds the eye pass segment timestamps, so it shows here too.
 struct DiagnosticOverrides {
-    bool force_render{},overlap_eyes{},timing_gpu{};
+    bool force_render{},overlap_eyes{},timing_gpu{},visibility_mask{};
     float yaw_degrees{};
     std::optional<std::string> autostart;
     std::optional<float> exit_after_seconds;
-    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes || timing_gpu;}
+    bool active() const noexcept {return force_render || yaw_degrees!=0 || autostart || exit_after_seconds || overlap_eyes || timing_gpu || visibility_mask;}
     std::string describe() const {
         std::ostringstream line;line<<"[vr] diagnostic overrides:";
         if(force_render) line<<" force_render=1";
@@ -72,6 +74,7 @@ struct DiagnosticOverrides {
         if(exit_after_seconds) line<<" exit_after="<<*exit_after_seconds<<'s';
         if(overlap_eyes) line<<" overlap_eyes=1";
         if(timing_gpu) line<<" timing_gpu=1";
+        if(visibility_mask) line<<" visibility_mask=1";
         return line.str();
     }
 };
@@ -84,6 +87,7 @@ inline DiagnosticOverrides diagnostic_overrides(EnvGetter getter=process_getenv)
         result.exit_after_seconds=seconds;
     result.overlap_eyes=env_override_bool("overlap_eyes",getter).value_or(false);
     result.timing_gpu=env_override_bool("timing_gpu",getter).value_or(false);
+    result.visibility_mask=env_override_bool("visibility_mask",getter).value_or(false);
     return result;
 }
 }

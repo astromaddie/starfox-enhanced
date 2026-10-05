@@ -39,6 +39,8 @@
 #include "starfox/vr/perf_log.hpp"
 #include "starfox/vr/env_overrides.hpp"
 #include "starfox/vr/refresh_rate.hpp"
+#include "starfox/vr/visibility_mask.hpp"
+#include "starfox/vr/vulkan_visibility_mask.hpp"
 #include "starfox/state/files.hpp"
 #include "starfox/vr/pcm_output.hpp"
 #include "starfox/audio/spc700_audio.hpp"
@@ -539,6 +541,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             if(host.stop_desktop_rumble) host.stop_desktop_rumble();
         }
     } rumble_shutdown{input,host};
+    const auto diagnostics=starfox::vr::diagnostic_overrides();
     starfox::vr::OpenXrSwapchains swapchains;
     constexpr std::array<int64_t,4> formats{VK_FORMAT_R8G8B8A8_SRGB,VK_FORMAT_B8G8R8A8_SRGB,
         VK_FORMAT_R8G8B8A8_UNORM,VK_FORMAT_B8G8R8A8_UNORM};
@@ -647,6 +650,12 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     starfox::vr::PauseSandbox sandbox;
     for(auto* packets:{&scene,&sprites,&hud,&cabin,&backgrounds,&tunnel_surround,&surrounding_stars,&startup_panel})
         packets->set_pipeline_cache(&shader_cache);
+    // SFX_VR_VISIBILITY_MASK: each eye's hidden area, drawn first in its pass.
+    starfox::vr::VisibilityMask visibility_mask;
+    starfox::vr::VulkanVisibilityMask mask_draw;
+    bool visibility_mask_on=false;
+    std::string visibility_mask_note;
+    starfox::vr::VulkanScenePipeline::set_visibility_mask_pass(VK_NULL_HANDLE);
     starfox::vr::VulkanScenePipeline pipeline;
     if(render_triangle && !pipeline.initialize(device.binding().device,get_device,targets.render_pass(),true)) {
         std::cerr<<pipeline.status()<<'\n';return 7;
@@ -669,6 +678,16 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         if(!shader_cache.initialize(device.binding().device,get_device,physical_properties,
             host.cartridge_save_path.empty()?std::filesystem::path{}:host.cartridge_save_path.parent_path()/"shader-cache"))
             std::cerr<<"Optional Vulkan pipeline cache unavailable; compiling normally\n";
+        // Before any ordered-layer eye pipeline exists, so they are all built masked.
+        if(diagnostics.visibility_mask && !runtime.supports_visibility_mask())
+            visibility_mask_note="[vr] SFX_VR_VISIBILITY_MASK ignored: the runtime lacks XR_KHR_visibility_mask";
+        else if(diagnostics.visibility_mask && !mask_draw.initialize(device.binding().device,get_device,targets.render_pass(),&shader_cache))
+            visibility_mask_note="[vr] SFX_VR_VISIBILITY_MASK ignored: "+mask_draw.status();
+        else if(diagnostics.visibility_mask) {
+            starfox::vr::VulkanScenePipeline::set_visibility_mask_pass(targets.render_pass());
+            visibility_mask=starfox::vr::VisibilityMask(starfox::vr::VisibilityMaskApi::from_instance(runtime.instance()));
+            visibility_mask_on=true;visibility_mask_note="[vr] visibility mask on; eye pass layers depth-test at the near plane";
+        }
         const std::array<starfox::vr::SceneVertex,3> triangle{{
             {{-.4F,-.3F,-2.F},{.1F,.8F,.2F,1.F}},
             {{.4F,-.3F,-2.F},{.1F,.8F,.2F,1.F}},
@@ -689,7 +708,6 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     }
     starfox::vr::VulkanEyeCommands commands;
     if(live && !live->output.open()) {std::cerr<<live->output.status()<<'\n';return 8;}
-    const auto diagnostics=starfox::vr::diagnostic_overrides();
     const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled() || diagnostics.timing_gpu
         ?std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig>(
             starfox::vr::VulkanEyeCommands::TimestampConfig{
@@ -753,6 +771,9 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     bool ui_was_visible=false;
     unsigned recenter_revision=0;
     starfox::vr::VulkanStereoDraw draw(commands,targets,diagnostics.overlap_eyes?&right_commands:nullptr);
+    if(visibility_mask_on) draw.set_prologue([&](VkCommandBuffer command,VkExtent2D extent,unsigned eye,const starfox::vr::EyeCamera& camera) {
+        if(!mask_draw.record(command,extent,eye,camera.projection)) throw std::runtime_error("Visibility mask recording failed");
+    });
     starfox::vr::VulkanStereoDraw pointer_draw(pointer_commands,pointer_targets);
     starfox::vr::CompositionLayers composition_layers(pointer_images);
     std::array<starfox::vr::EyeCamera,2> pointer_cameras{};
@@ -877,6 +898,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         if(session_file) session_file<<line<<std::endl;
     };
     if(diagnostics.active()) session_log(diagnostics.describe());
+    if(!visibility_mask_note.empty()) session_log(visibility_mask_note);
     session_log("[vr] eye buffers "+std::to_string(eye_extents[0].width)+"x"+std::to_string(eye_extents[0].height)
         +" ("+std::to_string(int(resolution_scale*100.F+.5F))+"%"+(resolution_override?", SFX_VR_RESOLUTION_SCALE)":")"));
     std::optional<unsigned> autostart_level;
@@ -949,6 +971,16 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     <<", current "<<*refresh_rate.current()<<" Hz";
             } else line<<"[vr] display refresh request skipped: "<<refresh_rate.status();
             session_log(line.str());
+        }
+        // Refetch between frames only: a mesh is never replaced under eye work.
+        if(visibility_mask_on && session.running() && !renderer.frame_pending() && !draw.pending()) {
+            const auto changes=session.take_visibility_mask_changes();
+            for(unsigned view=0;view<2;++view) if(changes&(1U<<view)) visibility_mask.invalidate(view);
+            if(visibility_mask.refresh(session.handle())) {
+                for(unsigned eye=0;eye<2;++eye) if(!mask_draw.upload(eye,properties,visibility_mask.triangles(eye)))
+                    session_log("[vr] visibility mask upload failed for eye "+std::to_string(eye)+": "+mask_draw.status());
+                session_log("[vr] "+visibility_mask.status());
+            }
         }
         renderer.set_head_translation(startup.presentation.translation_scale());
         const auto result=renderer.step_async([&](unsigned eye,uint32_t image,const auto& tracking_camera,XrTime time) {

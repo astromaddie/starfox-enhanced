@@ -15,6 +15,7 @@ template<typename T> T handle(uintptr_t n) {return reinterpret_cast<T>(n);}
 struct Fake {
     std::deque<XrSessionState> events;
     std::deque<XrEventDataReferenceSpaceChangePending> origin_changes;
+    std::deque<XrEventDataVisibilityMaskChangedKHR> mask_changes;
     std::vector<int> calls;
     bool render=true,tracked=true,fail_space=false,fail_locate=false,fail_exit=false,refuse_layers=false;
     unsigned end_calls=0;
@@ -50,6 +51,10 @@ XrResult XRAPI_PTR poll(XrInstance,XrEventDataBuffer* out) {
     require(out->type==XR_TYPE_EVENT_DATA_BUFFER,"event buffer type not reset");
     if(!fake.origin_changes.empty()) {
         const auto e=fake.origin_changes.front();fake.origin_changes.pop_front();
+        std::memcpy(out,&e,sizeof(e));return XR_SUCCESS;
+    }
+    if(!fake.mask_changes.empty()) {
+        const auto e=fake.mask_changes.front();fake.mask_changes.pop_front();
         std::memcpy(out,&e,sizeof(e));return XR_SUCCESS;
     }
     if(fake.events.empty()) return XR_EVENT_UNAVAILABLE;
@@ -92,6 +97,24 @@ void start(OpenXrSession& session) {
     require(!session.running() && !session.begin_frame(),"session ran before READY");
     fake.events.push_back(XR_SESSION_STATE_READY);
     require(session.poll_events() && session.running(),"READY did not start session");
+}
+// XR_KHR_visibility_mask: a change event marks only its own stereo view,
+// and only once, so the application refetches just that eye.
+void visibility_mask_events() {
+    fake=Fake{};
+    OpenXrSession s(api());start(s);
+    require(!s.take_visibility_mask_changes(),"mask change reported without an event");
+    XrEventDataVisibilityMaskChangedKHR change{XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR};
+    change.session=s.handle();change.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;change.viewIndex=1;
+    fake.mask_changes.push_back(change);
+    auto other=change;other.session=handle<XrSession>(99);fake.mask_changes.push_back(other);
+    other=change;other.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;other.viewIndex=0;fake.mask_changes.push_back(other);
+    other=change;other.viewIndex=2;fake.mask_changes.push_back(other);
+    require(s.poll_events() && s.running(),"mask change events broke polling");
+    require(s.take_visibility_mask_changes()==2U && !s.take_visibility_mask_changes(),"mask change not reported once for view 1");
+    change.viewIndex=0;fake.mask_changes.push_back(change);change.viewIndex=1;fake.mask_changes.push_back(change);
+    require(s.poll_events() && s.take_visibility_mask_changes()==3U,"both views' mask changes not reported");
+    fake=Fake{};
 }
 unsigned acquisitions{},released{};
 bool image_pending{};
@@ -337,6 +360,7 @@ void pointer_layer() {
 int main() try {
     forced_frames();
     forced_renderer();overlap_renderer();pointer_layer();acquisitions=released=0;
+    visibility_mask_events();
     fake=Fake{};
     {
         OpenXrSession s(api());start(s);

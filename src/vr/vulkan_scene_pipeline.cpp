@@ -21,7 +21,7 @@ VulkanScenePipeline::~VulkanScenePipeline() {close();}
 void VulkanScenePipeline::close() noexcept {
     if(pipeline_) destroy_pipeline_(device_,pipeline_,nullptr);
     if(layout_) destroy_layout_(device_,layout_,nullptr);
-    pipeline_={};layout_={};device_={};
+    pipeline_={};layout_={};device_={};near_depth_=false;
 }
 bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,VkRenderPass pass,bool depth_test,SceneTopology topology,VkDescriptorSetLayout textures,SceneBlend mode,VulkanPipelineCache* cache,bool depth_write) {
     close();
@@ -34,6 +34,10 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
             throw std::runtime_error("Invalid scene topology");
         topology_=topology;
         textured_=textures!=VK_NULL_HANDLE;
+        const bool mask=mode==SceneBlend::visibility_mask;
+        // Masked ordered layers test at depth 0 so only the mask's 0 rejects them.
+        const bool masked_layer=!mask && !depth_test && masked_pass_ && pass==masked_pass_;
+        near_depth_=mask || masked_layer;
         if(textured_) bind_descriptors_=entry<PFN_vkCmdBindDescriptorSets>(get,device,"vkCmdBindDescriptorSets");
         device_=device;
 #define LOAD(member,type,name) member=entry<type>(get,device,name)
@@ -54,14 +58,17 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
         module.codeSize=textured_?sizeof(shader::vertex_textured):sizeof(shader::vertex);
         module.pCode=textured_?shader::vertex_textured:shader::vertex;
         check(create_shader(device,&module,nullptr,&modules[0]),"Create vertex shader");
-        module.codeSize=textured_?sizeof(shader::fragment_textured):sizeof(shader::fragment);
-        module.pCode=textured_?shader::fragment_textured:shader::fragment;
-        check(create_shader(device,&module,nullptr,&modules[1]),"Create fragment shader");
+        if(!mask) {
+            module.codeSize=textured_?sizeof(shader::fragment_textured):sizeof(shader::fragment);
+            module.pCode=textured_?shader::fragment_textured:shader::fragment;
+            check(create_shader(device,&module,nullptr,&modules[1]),"Create fragment shader");
+        }
         VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(SceneConstants)};
         VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         layout.pushConstantRangeCount=1;layout.pPushConstantRanges=&range;
         if(textured_) {layout.setLayoutCount=1;layout.pSetLayouts=&textures;}
         check(create_layout(device,&layout,nullptr,&layout_),"Create scene layout");
+        // The mask writes depth only, so it needs no fragment stage.
         std::array<VkPipelineShaderStageCreateInfo,2> stages{};
         for(auto& stage:stages) stage.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT;stages[0].module=modules[0];stages[0].pName=textured_?"vertex_textured_main":"vertex_main";
@@ -95,10 +102,12 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
         VkPipelineMultisampleStateCreateInfo samples{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         samples.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
         VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-        depth.depthTestEnable=depth_test;depth.depthWriteEnable=depth_test && depth_write;
+        depth.depthTestEnable=depth_test || near_depth_;depth.depthWriteEnable=mask || (depth_test && depth_write);
+        // LESS for the mask too (it lands on the cleared 1.0): ALWAYS with
+        // writes would end Turnip's low-resolution Z for the rest of the pass.
         depth.depthCompareOp=VK_COMPARE_OP_LESS;
-        VkPipelineColorBlendAttachmentState attachment{};attachment.colorWriteMask=0xf;
-        if(mode!=SceneBlend::opaque) {
+        VkPipelineColorBlendAttachmentState attachment{};attachment.colorWriteMask=mask?0:0xf;
+        if(mode!=SceneBlend::opaque && !mask) {
             attachment.blendEnable=VK_TRUE;
             attachment.srcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;
             attachment.dstColorBlendFactor=(mode==SceneBlend::half_add || mode==SceneBlend::half_subtract)
@@ -125,7 +134,7 @@ bool VulkanScenePipeline::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get
         VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
         dynamic.dynamicStateCount=2;dynamic.pDynamicStates=dynamic_states;
         VkGraphicsPipelineCreateInfo create{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        create.stageCount=2;create.pStages=stages.data();create.pVertexInputState=&input;
+        create.stageCount=mask?1:2;create.pStages=stages.data();create.pVertexInputState=&input;
         create.pInputAssemblyState=&assembly;create.pViewportState=&view;create.pRasterizationState=&raster;
         create.pMultisampleState=&samples;create.pColorBlendState=&blend;create.pDynamicState=&dynamic;
         create.pDepthStencilState=&depth;
@@ -149,7 +158,7 @@ bool VulkanScenePipeline::record_range(VkCommandBuffer command,VkExtent2D extent
     if(!pipeline_ || !command || !vertices || !count || first>total || count>total-first
         || first%primitive || count%primitive || !extent.width || !extent.height) return false;
     if(textured_ && !textures) return false;
-    const VkViewport viewport{0,0,float(extent.width),float(extent.height),0,1};
+    const VkViewport viewport{0,0,float(extent.width),float(extent.height),0,near_depth_?0.F:1.F};
     const VkRect2D scissor{{0,0},extent};const VkDeviceSize offset=0;
     bind_pipeline_(command,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline_);
     if(textured_) bind_descriptors_(command,VK_PIPELINE_BIND_POINT_GRAPHICS,layout_,0,1,&textures,0,nullptr);

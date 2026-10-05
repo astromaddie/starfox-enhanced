@@ -945,6 +945,7 @@ range. An override wins over the saved preference and is never written to
 | `SFX_VR_AUTOSTART` | A level name such as `LEVEL1_1` (any case): skips the startup menu and starts that level as the level-select cheat would. An unknown name is logged and the menu shows. Not a registry key. Added October 4 |
 | `SFX_VR_EXIT_AFTER` | Seconds after the first in-game frame; then quits through the QUIT TO STEAM path. Not a registry key. Added October 4 |
 | `SFX_VR_OVERLAP_EYES` | `1` submits eye 1 straight after eye 0 instead of waiting for eye 0's fence (see "Overlapped eye submission" below). Default off, which keeps the serial eye loop. Not a registry key. Added October 4 |
+| `SFX_VR_VISIBILITY_MASK` | `1` fetches each eye's hidden-area mesh through `XR_KHR_visibility_mask` and draws it first in the eye pass, so nothing is shaded where the lenses never look (see "Visibility mask" below). Default off, which leaves the pipelines and the eye pass unchanged. Ignored, with a log line, when the runtime lacks the extension. Not a registry key. Added October 5 |
 
 No other registry key is implemented by this port, so no other variable has any
 effect.
@@ -1597,4 +1598,67 @@ mode instead, the segments are whole-eye times.
 
 To check on the device: the usual forced LEVEL1_1 capture with
 `SFX_VR_TIMING_GPU=1`, then look for `passes=` in `vr-session.log`.
+
+## Visibility mask (October 5)
+
+Untested on the device. Covered by the host build and injected-fake unit tests only.
+
+SteamVR reports HiddenArea 15.64%: that share of each eye image is never shown by
+the lenses, but the eye pass still shades it. `SFX_VR_VISIBILITY_MASK=1` stops that.
+
+- `XR_KHR_visibility_mask` is enabled on the instance whenever it's advertised, like
+  `XR_FB_display_refresh_rate`. With the variable unset nothing else happens: no
+  mask calls, no extra draw, and every pipeline is built exactly as before.
+- With it set, `include/starfox/vr/visibility_mask.hpp` fetches the
+  `HIDDEN_TRIANGLE_MESH` for each primary stereo view (two-call idiom, injectable
+  function table). `XrEventDataVisibilityMaskChangedKHR` marks just that view, and
+  it's refetched between frames, never with eye work in flight. The log shows
+  `[vr] Visibility mask eye 0: N hidden triangles, eye 1: M hidden triangles`.
+- The mesh is in tangent space (x/y on the z=-1 plane), so it's drawn with an
+  identity view and the eye's own projection, never the head or world transform.
+- The mask is the first draw in each eye's pass, before the stars. It writes depth
+  0 (the near plane, via a `[0,0]` viewport depth range), no colour, and has no
+  fragment shader. It compares LESS against the cleared 1.0. ALWAYS would also work,
+  but on Turnip a depth-writing ALWAYS draw switches off low-resolution Z (LRZ) for
+  the rest of the pass.
+
+Why not depth alone, or stencil: only the models, cabin and cockpit HUD depth-test.
+The expensive full-screen layers (stars, backgrounds and sky tiles, tunnel
+surround) and the sprites are ordered layers with depth testing off, so a
+depth-only mask wouldn't touch them. The depth format is `D32_SFLOAT` or `D16_UNORM`,
+with no stencil, so stencil would mean a new depth format. Depth bounds would need
+a device feature. Instead, when the mask is on, every pipeline created for the eye
+render pass that would not depth-test (`VulkanScenePipeline::set_visibility_mask_pass`)
+tests LESS without writing, at depth 0 through the same `[0,0]` viewport range. A
+fragment at 0 passes against anything above 0 (cleared 1.0 or any model depth), so
+those layers draw exactly as before everywhere except where the mask wrote 0. No
+shader changed. UI quad and pointer-layer pipelines use their own render passes and
+are untouched.
+
+| Culled in the hidden area | How |
+| --- | --- |
+| models (source scene, packet scene, shadows), cabin, cockpit HUD, debug triangle | already depth-test LESS; fail against 0 |
+| surrounding stars, controls stars, backgrounds and sky tiles, tunnel surround | ordered layers now tested at depth 0 |
+| sprites, sandbox pointer (eye-pass fallback), bomb circle, scramble shutter, ray shadow composite, non-cockpit HUD | ordered layers now tested at depth 0 |
+
+Not culled: the render pass clear, the tile store at the end of the pass, eye 0's
+compute pre-pass, the mask draw itself, and the separate UI and pointer layers. On a
+tiler, binning and the store still cover the whole image, so the gain is at most
+about 15% of fragment work, less in light scenes. With `SFX_VR_TIMING_GPU=1` the mask
+counts in the `sky` segment.
+
+Risks to watch on the device:
+- Geometry exactly on the near plane (0.05 units) writes depth 0 and would hide later
+  layers there. That shouldn't happen in practice.
+- Turnip may treat the newly depth-tested blended layers differently for LRZ or early Z.
+  Compare `gpu_eyes` with and without the mask, not just `passes=`.
+- In standby with `SFX_VR_FORCE_RENDER` and synthetic views (±50° x ±48°), the real
+  lens mask doesn't line up with the synthetic projection. Timing still holds, but
+  screenshots from such runs show the mask in the wrong place.
+- If the runtime returns an empty mesh, nothing is culled and the log says so.
+
+To check on the device, run the same forced LEVEL1_1 capture twice, without and
+then with `SFX_VR_VISIBILITY_MASK=1`, both with `SFX_VR_TIMING_GPU=1`, and compare
+`gpu_eyes`, `passes=`, fps and missed. Look for the `[vr] Visibility mask` line.
+Worn, check that nothing is visibly missing at the edge of the view.
 

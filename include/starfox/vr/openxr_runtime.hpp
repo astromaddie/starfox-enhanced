@@ -25,12 +25,15 @@ public:
     }
     // XR_FB_display_refresh_rate was advertised and enabled on the instance.
     bool supports_display_refresh_rate() const noexcept {return display_refresh_rate_;}
+    // XR_KHR_visibility_mask was advertised and enabled; used only with SFX_VR_VISIBILITY_MASK.
+    bool supports_visibility_mask() const noexcept {return visibility_mask_;}
 private:
     XrInstance instance_{XR_NULL_HANDLE};
     XrSystemId system_{XR_NULL_SYSTEM_ID};
     bool vulkan_{};
     bool frame_controller_interaction_{};
     bool display_refresh_rate_{};
+    bool visibility_mask_{};
     std::vector<XrViewConfigurationView> views_;
     std::string status_{"OpenXR not initialized"};
 };
