@@ -155,6 +155,10 @@ DrawPacket cockpit_arwing_packet(bool srgb,unsigned brightness,std::optional<std
         if(!has_area(polygon))continue;
         for(size_t i=1;i+1<polygon.size();++i)for(size_t k:{size_t{0},i,i+1})out.geometry.vertices.push_back(polygon[k]);
     }
+    // Authored console and low cabin modules share the pilot rig. Wing damage
+    // clips only the exterior source ship, never the interior around the pilot.
+    for(const auto& triangle:cockpit_assets::hybrid_interior)for(const auto& p:triangle.points)
+        out.geometry.vertices.push_back(flat_vertex(p,triangle.rgb,srgb,brightness));
     return out;
 }
 DrawPacket cockpit_arwing_repair_packet(const DrawPacket& source) {

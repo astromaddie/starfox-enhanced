@@ -21,7 +21,7 @@ std::array<float,3> point(const Matrix4& m,const float* p) {
 }
 void near(float a,float b,const std::source_location& where=std::source_location::current()) {require(std::abs(a-b)<.001F,where);}
 void verify_rig() {
-    const auto imported=cockpit_arwing_packet();require(imported.geometry.vertices.size()==497*3);
+    const auto imported=cockpit_arwing_packet();require(imported.geometry.vertices.size()==(497+148)*3);
     const auto dark=cockpit_arwing_packet(false,0),linear=cockpit_arwing_packet(true);
     for(size_t i=0;i<imported.geometry.vertices.size();++i) {
         const auto& v=imported.geometry.vertices[i];
@@ -31,6 +31,10 @@ void verify_rig() {
             const float c=v.color[a];near(linear.geometry.vertices[i].color[a],c<=.04045F?c/12.92F:std::pow((c+.055F)/1.055F,2.4F));
         }
     }
+    // Added cabin detail must stay below the window sightlines in every direction.
+    // Half a metre below the eye leaves the supplied canopy as the visible frame.
+    for(size_t i=497*3;i<imported.geometry.vertices.size();++i)
+        require(imported.geometry.vertices[i].position[1]<-.5F);
     for(const auto bounds:{std::array{-2.F,9.F},std::array{-9.F,2.F},std::array{-2.F,2.F}}) {
         const auto trimmed=cockpit_arwing_packet(false,15,bounds);require(!trimmed.geometry.vertices.empty());
         for(const auto& v:trimmed.geometry.vertices)require(v.position[0]>=bounds[0]-.0001F && v.position[0]<=bounds[1]+.0001F);
@@ -179,7 +183,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
             near(high,float(live[1])/std::abs(intact[1])*span);
         }
     }
-    require(cabin[0].geometry.vertices.size()==497*3);
+    require(cabin[0].geometry.vertices.size()==(497+148)*3);
     const auto expected_hull=cockpit_arwing_packet();
     require(same_draw_geometry(cabin,std::span(&expected_hull,1)) && cabin[0].model==identity_matrix);
     std::array<float,3> lowest{1e9F,1e9F,1e9F},highest{-1e9F,-1e9F,-1e9F};
@@ -380,7 +384,7 @@ void cartridge(const assets::RomImage& rom,const assets::SymbolMap& symbols,cons
     std::cout<<(scene.meters.extended?"EX":"Original")<<" seeded native repair flash: "<<visible
         <<" visible and "<<hidden<<" hidden phases, native colour and replacement mesh registration passed\n";
     std::cout<<(scene.meters.extended?"EX":"Original")<<" bundle cockpit: "
-        <<cabin[0].geometry.vertices.size()/3<<" imported hull/interior/frame triangles; source state/other objects/HUD art unchanged\n";
+        <<cabin[0].geometry.vertices.size()/3<<" cockpit triangles (497 supplied + 148 authored); source state/other objects/HUD art unchanged\n";
 }
 }
 int main(int argc,char** argv) try {

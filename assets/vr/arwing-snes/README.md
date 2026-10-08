@@ -31,4 +31,19 @@ the art. Native gameplay state still owns wing damage and the repair
 flash's visibility and colour; cockpit presentation applies them to this mesh.
 Chase-view and world ship models retain the native art.
 
+The hybrid interior is authored separately in `hybrid-interior.json`: 25 modular
+parts / 148 triangles in pilot metres, plus explicit palette overrides for
+selected source console, seat and lower cabin faces. The source geometry JSON,
+all 497 source triangles' positions, and the canopy's geometry and colours remain
+unchanged. The new parts form a chamfered instrument well, bevelled surround,
+console cheeks, recessed vents, low sidewall panels and rear shoulder trims.
+The highest added vertex is 0.585 m below the pilot eye. There are no invented
+active instruments; the native HUD and its compact backing bands are unchanged.
+
+The dark well sits 4 mm above the source console, behind the 6 mm backing and
+8 mm native artwork. Its raised surround stays outside the live artwork bounds.
+The authored interior stays intact during wing loss; the native repair effect
+continues to trace the supplied ship edges. Edit the hybrid JSON and rerun the
+same generator; reimporting the supplied OBJ does not overwrite the hybrid.
+
 Verification status: host geometry and runtime tests only; headset-unverified.

@@ -1782,3 +1782,35 @@ Host verification on the change based on `842f495`:
 
 The replacement is **headset-unverified**: no new device performance, controller,
 stereo, comfort or worn acceptance is claimed by these host checks.
+
+
+## Hybrid cockpit candidate (October 8)
+
+Based on `cb1ff1051932a40f728da5077ee58987e0975eda`, the third cockpit keeps the
+supplied model's open canopy and adds an authored interior reminiscent of the
+original cockpit: a chamfered dark instrument well, raised silver bevel,
+angular console cheeks, recessed structural vents, low sidewall panels and
+rear shoulder trim. `assets/vr/arwing-snes/hybrid-interior.json` owns 25 parts /
+148 triangles and selected source interior palette overrides. The resulting
+cockpit has 645 triangles. No cartridge geometry or art is added to the repo.
+
+The original imported geometry JSON is untouched. All 497 source triangles keep
+their positions; the 38 canopy triangles also keep their exact materials. The
+same pilot fit, native HUD pixels/layout/mount/backing, simulation and camera
+settings apply. Added geometry stays at least 0.585 m below the eye and outside
+the live HUD ray envelope. It remains intact on wing loss; repair outlines
+continue to use the supplied ship's edges with native visibility and colour.
+
+Host verification: generator freshness, six focused CTests and real Original/EX
+bundle fixtures pass, including head clearance, sightlines, HUD occlusion,
+source state/art invariance, wing damage and repair phases. Same-camera exact
+production packet renders are `comparison/hybrid-{front,left,rear}.png`, with
+`hybrid-boss-*` and `hybrid-comms-*` variants in the October 8 task workspace.
+The normal, boss and communication views were directly inspected. Communication
+coverage is packet placement and unchanged art bytes, not live portrait-animation
+acceptance. Independent Original/EX normal/boss/comms packet comparisons retain
+the exact source positions, canopy materials, HUD/world packets and camera rig.
+The nearest point on any production triangle remains 0.366162 m from the eye;
+`comparison/hybrid-verification.json` records the comparisons and asset hashes.
+This is host geometry evidence; no device install, GPU performance, stereo or
+worn acceptance has been performed for the hybrid candidate.
