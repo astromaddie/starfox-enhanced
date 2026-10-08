@@ -1784,7 +1784,7 @@ The replacement is **headset-unverified**: no new device performance, controller
 stereo, comfort or worn acceptance is claimed by these host checks.
 
 
-## Hybrid cockpit candidate (October 8)
+## Approved hybrid cockpit (October 8)
 
 Based on `cb1ff1051932a40f728da5077ee58987e0975eda`, the third cockpit keeps the
 supplied model's open canopy and adds an authored interior reminiscent of the
@@ -1812,5 +1812,24 @@ acceptance. Independent Original/EX normal/boss/comms packet comparisons retain
 the exact source positions, canopy materials, HUD/world packets and camera rig.
 The nearest point on any production triangle remains 0.366162 m from the eye;
 `comparison/hybrid-verification.json` records the comparisons and asset hashes.
-This is host geometry evidence; no device install, GPU performance, stereo or
-worn acceptance has been performed for the hybrid candidate.
+This is host geometry evidence; GPU performance, stereo and worn acceptance
+remain unverified for the hybrid cockpit.
+
+The user approved the third design after reviewing the comparison. Source
+`328a937492e83ba219469875d221db83211f4f1c` was installed in the existing
+`/home/steamos/devkit-game/StarFoxEnhanced` title after all four jobs in
+[CI run 37765483643](https://github.com/astromaddie/starfox-enhanced/actions/runs/37765483643)
+passed. The exact ARM64 runtime artifact passed package validation; its executable
+SHA-256 is `2827f50f033d7bbf1bb77fa415851f7ed76234f93478c1f9c1f89db2f6fd8cd4`.
+All ten installed package files match the artifact. Only the executable and
+build metadata were replaced, retaining modes 0755/0644 and steamos ownership.
+
+Full pre-install title and user-data backups, raw manifests and preservation
+proof are in the October 8 task workspace's
+`evidence/third-hybrid-install-328a937/`. Preserved files match in bytes, type,
+mode, numeric ownership, symlink target and modification time; directory modes
+and ownership are retained. The title directory's modification time advanced
+when the two package files were replaced. Saves, preferences, shader cache and
+the armed diagnostics file remain intact. The game was not launched; temporary
+staging was removed and the Frame lock released. This verifies the installed
+package and data preservation, without a new boot or headset acceptance claim.
