@@ -1313,7 +1313,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         live->dialogue_layout.set_language(uint8_t(startup.language));
                         auto next_hud=compact_hud?layout_a_instrument_packets(live->rom,live->symbols,*snapshot,live->dialogue_layout,srgb)
                             :std::vector<DrawPacket>{};
-                        if(cockpit_active)mount_cockpit_instruments(next_hud,snapshot->meters.extended);
+                        if(cockpit_active)mount_cockpit_instruments(next_hud,snapshot->meters.extended,srgb,snapshot->display_brightness);
                         auto packet=starfox::vr::source_sprite_packet(*snapshot->ppu,snapshot->display_brightness,{},srgb,&snapshot->meters,
                             nullptr,compact_hud?SourceSpritePass::world:SourceSpritePass::all);
                         // World/aim sprites retain the native viewing rays.

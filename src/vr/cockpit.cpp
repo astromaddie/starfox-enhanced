@@ -1,17 +1,10 @@
 #include "starfox/vr/cockpit.hpp"
 #include <cmath>
-#include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
 #include <vector>
 #include "cockpit_assets.inc"
 namespace starfox::vr {
 namespace {
-// Presentation calibration only: leave the instrument face and lower cabin
-// fixed, widening/lowering the window and blending their shared connections.
-std::array<float,3> window_frame_position(std::array<float,3> p) {
-    const float weight=std::clamp((p[1]+.72F)/.24F,0.F,1.F);
-    p[0]*=1.F+.7F*weight;p[1]-=.16F*weight;return p;
-}
 SceneVertex flat_vertex(std::array<float,3> position,uint32_t rgb,bool srgb,unsigned brightness) {
     SceneVertex vertex{};std::copy(position.begin(),position.end(),vertex.position);
     for(unsigned c=0;c<3;++c) {
@@ -54,147 +47,75 @@ bool has_area(const std::vector<SceneVertex>& polygon) {
     }
     return normal[0]*normal[0]+normal[1]*normal[1]+normal[2]*normal[2]>1e-14F;
 }
-// Convex pieces of a convex polygon that lie outside an axis-aligned box.
-std::vector<std::vector<SceneVertex>> subtract_box(std::vector<SceneVertex> inside,const CockpitCutout& box) {
-    std::vector<std::vector<SceneVertex>> out;
-    // Leave polygons that cannot touch the box whole.
-    for(unsigned axis=0;axis<3;++axis) {
-        float low=inside[0].position[axis],high=low;
-        for(const auto& v:inside) {low=std::min(low,v.position[axis]);high=std::max(high,v.position[axis]);}
-        if(high<=box.low[axis] || low>=box.high[axis]) {out.push_back(std::move(inside));return out;}
-    }
-    for(unsigned axis=0;axis<3;++axis)for(bool high:{false,true}) {
-        const float value=high?box.high[axis]:box.low[axis];
-        auto outside=clip_axis(inside,axis,value,high);
-        if(has_area(outside))out.push_back(std::move(outside));
-        inside=clip_axis(inside,axis,value,!high);
-        if(inside.size()<3)return out;
-    }
-    return out;
-}
-void subtract_box(const std::array<SceneVertex,2>& segment,const CockpitCutout& box,std::vector<std::array<SceneVertex,2>>& out) {
-    float enter=0,leave=1;
-    for(unsigned axis=0;axis<3;++axis) {
-        const float a=segment[0].position[axis],d=segment[1].position[axis]-a;
-        if(d==0) {if(a<box.low[axis] || a>box.high[axis]) {out.push_back(segment);return;}continue;}
-        float t0=(box.low[axis]-a)/d,t1=(box.high[axis]-a)/d;if(t0>t1)std::swap(t0,t1);
-        enter=std::max(enter,t0);leave=std::min(leave,t1);
-    }
-    if(enter>=leave) {out.push_back(segment);return;}
-    if(enter>0)out.push_back({segment[0],between(segment[0],segment[1],enter)});
-    if(leave<1)out.push_back({between(segment[0],segment[1],leave),segment[1]});
-}
-SceneVertex pilot_vertex(SceneVertex v) {
-    v.position[0]/=256.F;v.position[1]/=-256.F;v.position[2]/=-256.F;
-    // The cabin is seen from independent head poses, not the cartridge's eye.
-    v.visibility_enabled=v.group_enabled=0;return v;
-}
 }
 Matrix4 cockpit_instrument_mount(bool extended) noexcept {
-    // EX's fixed Layout A band is 190 source pixels wide (Original fits 141).
-    // Uniform, cartridge-stable fit retains artwork/aspect without health-driven resizing.
+    // Fit the existing unmodified Layout A artwork to the supplied sloped dash.
+    // The face rises 0.238 m over 0.0377 m in OBJ coordinates. Lift the art
+    // 8 mm toward the pilot to avoid z fighting; preserve its authored aspect.
     const float pixel=.00305F*(extended?141.F/190.F:1.F);
     const float anchor_x=extended?101.F:76.F;
-    return {pixel,0,0,0,0,-pixel,0,0,0,0,1,0,
-        -.015F+(extended?.001525F:0.F)-anchor_x*pixel,-.852F+175*pixel,-1.243F,1};
+    constexpr float slope=.0377F/.238F;
+    const float vertical=1.F/std::sqrt(1.F+slope*slope);
+    constexpr float centre_y=-.75F;
+    constexpr float centre_z=(-.9861F+.40F)*cockpit_arwing_scale
+        +(centre_y-(.7299F-1.05F)*cockpit_arwing_scale)*slope+.008F;
+    return {pixel,0,0,0,0,-pixel*vertical,-pixel*vertical*slope,0,0,0,1,0,
+        -.015F+(extended?.001525F:0.F)-anchor_x*pixel,
+        centre_y+175*pixel*vertical,centre_z+175*pixel*vertical*slope,1};
 }
-void mount_cockpit_instruments(std::span<DrawPacket> packets,bool extended) {
+void mount_cockpit_instruments(std::vector<DrawPacket>& packets,bool extended,bool srgb,unsigned brightness) {
     const auto overlay=overlay_panel_matrix();auto inverse=identity_matrix;
     inverse[0]=1/overlay[0];inverse[5]=1/overlay[5];
     inverse[12]=-overlay[12]/overlay[0];inverse[13]=-overlay[13]/overlay[5];inverse[14]=-overlay[14];
     const auto mount=multiply_matrix(cockpit_instrument_mount(extended),inverse);
     for(auto& packet:packets)packet.model=multiply_matrix(mount,packet.model);
-}
-DrawPacket cockpit_rear_packet(bool srgb,unsigned brightness) {
-    DrawPacket out;
-    for(const auto& triangle:cockpit_assets::rear) for(const auto& p:triangle.points)
-        out.geometry.vertices.push_back(flat_vertex(window_frame_position(p),triangle.rgb,srgb,brightness));
-    return out;
-}
-DrawPacket cockpit_front_packet(const assets::Shape& shape,bool srgb,unsigned brightness) {
-    if(shape.faces.size()!=66)throw std::runtime_error("Unsupported C cockpit face topology");
-    std::array<render::Rgba8,256> palette{};
-    for(auto& colour:palette)colour={255,255,255,255};
-    render::RenderPose pose;pose.z=250;pose.scale=2;
-    DrawPacket decoded;std::string error;
-    if(!build_draw_packet(shape,pose,palette,112,1,false,256,decoded,error))
-        throw std::runtime_error("C cockpit decode: "+error);
-    const auto vertices=decoded.geometry.vertex_view();
-    if(vertices.size()!=std::size(cockpit_assets::front)*3 || !decoded.geometry.deferred.empty()
-        || !decoded.geometry.line_view().empty())throw std::runtime_error("Unsupported C cockpit packet topology");
-    // Geometry-only signature verified against both bundled variants. Their
-    // palette/descriptor addresses differ, but positions and face ranges match.
-    // Reject a different cabin before any index-based material assignment.
-    uint64_t signature=14695981039346656037ULL;
-    const auto word=[&](uint32_t value) {for(unsigned i=0;i<4;++i) {
-        signature^=(value>>(i*8))&255;signature*=1099511628211ULL;
-    }};
-    for(const auto& v:vertices)for(float value:v.position)word(starfox::bit_cast<uint32_t>(value));
-    for(const auto& r:decoded.geometry.ranges) {word(uint32_t(r.source_face));word(r.first_vertex);word(r.vertex_count);}
-    if(signature!=0x1a590b6396dbcd5aULL)throw std::runtime_error("Unsupported C cockpit geometry signature");
-    DrawPacket out;
-    for(const auto& assignment:cockpit_assets::front) {
-        const auto range=std::find_if(decoded.geometry.ranges.begin(),decoded.geometry.ranges.end(),
-            [&](const auto& r){return r.source_face==assignment.face && assignment.first>=r.first_vertex
-                && assignment.first+3<=r.first_vertex+r.vertex_count;});
-        if(range==decoded.geometry.ranges.end() || assignment.first!=range->first_vertex+assignment.triangle*3)
-            throw std::runtime_error("Unsupported C cockpit face/material mapping");
-        for(unsigned i=0;i<3;++i) {
-            const auto& v=vertices[assignment.first+i];
-            out.geometry.vertices.push_back(flat_vertex(window_frame_position({v.position[0]*.015F,
-                -v.position[1]*.015F-.27F,-v.position[2]*.015F-1.4F}),assignment.rgb,srgb,brightness));
+    // The supplied cyan console needs a dark inset under the native white art.
+    // Follow its actual bounds (including portraits/boss meters) without changing
+    // the artwork, layout or scale. Draw the backing first: HUD passes do not write depth.
+    struct Band {float left,right,bottom,top;};
+    std::vector<Band> bands;
+    constexpr float padding=.012F;
+    for(const auto& packet:packets) {
+        const auto vertices=packet.geometry.vertex_view();
+        for(size_t first=0;first+2<vertices.size();first+=3) {
+            Band band{1e9F,-1e9F,1e9F,-1e9F};
+            for(size_t i=first;i<first+3;++i) {
+                const auto& m=packet.model;const auto* p=vertices[i].position;
+                const float x=m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12];
+                const float y=m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13];
+                band.left=std::min(band.left,x);band.right=std::max(band.right,x);
+                band.bottom=std::min(band.bottom,y);band.top=std::max(band.top,y);
+            }
+            band.left-=padding;band.right+=padding;band.bottom-=padding;band.top+=padding;
+            // Only connected artwork rows share a backing. The distant native
+            // boss row must not fill the empty space above the main instruments.
+            for(size_t i=0;i<bands.size();) {
+                const auto& other=bands[i];
+                if(band.bottom<=other.top && band.top>=other.bottom) {
+                    band.left=std::min(band.left,other.left);band.right=std::max(band.right,other.right);
+                    band.bottom=std::min(band.bottom,other.bottom);band.top=std::max(band.top,other.top);
+                    bands.erase(bands.begin()+i);i=0;
+                } else ++i;
+            }
+            bands.push_back(band);
         }
     }
-    return out;
-}
-DrawPacket cockpit_ship_packet(const DrawPacket& source,std::optional<std::array<float,2>> keep_x) {
-    // The whole live ship surrounds the cabin: nose ahead, wings and tail
-    // beside and behind the pilot. The native repair/upgrade wireframe shares
-    // the player's source pose, so it uses the same rig with its blink state.
-    // Hull inside the cabin cut-outs is removed; the cabin replaces it there.
-    DrawPacket out;out.preserve_native_colour=source.preserve_native_colour;out.shading=source.shading;
-    out.geometry.texels=source.geometry.texels;out.geometry.shared_texels=source.geometry.shared_texels;
-    out.model={cockpit_ship_scale,0,0,0,0,cockpit_ship_scale,0,0,0,0,cockpit_ship_scale,0,
-        -cockpit_seat_m[0],-cockpit_seat_m[1],-cockpit_seat_m[2],1};
-    std::vector<CockpitCutout> local;
-    for(const auto& box:cockpit_hull_cutouts) {
-        auto& l=local.emplace_back();
-        for(unsigned a=0;a<3;++a) {
-            l.low[a]=(box.low[a]+cockpit_seat_m[a])/cockpit_ship_scale;
-            l.high[a]=(box.high[a]+cockpit_seat_m[a])/cockpit_ship_scale;
-        }
+    if(bands.empty())return;
+    const auto face=cockpit_instrument_mount(extended);
+    const auto vertex=[&](float x,float y) {
+        const float z=face[14]+(y-face[13])*face[6]/face[5]-.002F;
+        return flat_vertex({x,y,z},0x101a22U,srgb,brightness);
+    };
+    DrawPacket backing;
+    for(const auto& b:bands) {
+        const std::array vertices{vertex(b.left,b.bottom),vertex(b.right,b.bottom),vertex(b.right,b.top),
+            vertex(b.left,b.bottom),vertex(b.right,b.top),vertex(b.left,b.top)};
+        backing.geometry.vertices.insert(backing.geometry.vertices.end(),vertices.begin(),vertices.end());
     }
-    if(keep_x) {
-        constexpr float far=1e6F;
-        local.push_back({{-far,-far,-far},{(*keep_x)[0],far,far}});
-        local.push_back({{(*keep_x)[1],-far,-far},{far,far,far}});
-    }
-    const auto vertices=source.geometry.vertex_view();
-    if(vertices.size()%3)throw std::runtime_error("Invalid cockpit player triangle packet");
-    for(size_t i=0;i<vertices.size();i+=3) {
-        std::vector<std::vector<SceneVertex>> pieces{{pilot_vertex(vertices[i]),pilot_vertex(vertices[i+1]),pilot_vertex(vertices[i+2])}};
-        for(const auto& box:local) {
-            std::vector<std::vector<SceneVertex>> kept;
-            for(auto& piece:pieces)for(auto& outside:subtract_box(std::move(piece),box))kept.push_back(std::move(outside));
-            pieces=std::move(kept);
-        }
-        for(const auto& polygon:pieces)for(size_t j=1;j+1<polygon.size();++j)
-            for(size_t k:{size_t{0},j,j+1})out.geometry.vertices.push_back(polygon[k]);
-    }
-    const auto lines=source.geometry.line_view();
-    for(size_t i=0;i+1<lines.size();i+=2) {
-        std::vector<std::array<SceneVertex,2>> segments{{pilot_vertex(lines[i]),pilot_vertex(lines[i+1])}};
-        for(const auto& box:local) {
-            std::vector<std::array<SceneVertex,2>> kept;
-            for(const auto& segment:segments)subtract_box(segment,box,kept);
-            segments=std::move(kept);
-        }
-        for(const auto& segment:segments)out.geometry.line_vertices.insert(out.geometry.line_vertices.end(),{segment[0],segment[1]});
-    }
-    return out;
+    packets.insert(packets.begin(),std::move(backing));
 }
 CockpitGeometry::CockpitGeometry(const assets::RomImage& rom,const assets::SymbolMap& symbols)
-    :decoder_(rom,symbols),symbols_(symbols) {
+    :decoder_(rom,symbols) {
     const auto& values=symbols.find("FLASHPLAYER_STRAT");if(!values.empty())flash_player_=values.front();
     if(const auto& intact=symbols.find("MYSHIP_4");!intact.empty())intact_x_=x_extent(intact.front());
 }
@@ -207,24 +128,56 @@ std::array<int,2> CockpitGeometry::x_extent(uint32_t shape) {
     }
     return found->second;
 }
-// The cutscene hull has no damage variants. When the live ship has lost a
-// wing (MYSHIP_L/R/B are narrower than MYSHIP_4), trim it to the live extent.
+// When the live ship loses a wing (MYSHIP_L/R/B are narrower than MYSHIP_4),
+// retain the same fraction of the replacement mesh span on that side.
 std::optional<std::array<float,2>> CockpitGeometry::damaged_extent(uint32_t live_shape) {
     if(!intact_x_) return std::nullopt;
     const auto e=x_extent(live_shape);
     if(e==*intact_x_) return std::nullopt;
     return std::array<float,2>{e[0]>(*intact_x_)[0]?e[0]/256.F:-1e6F,e[1]<(*intact_x_)[1]?e[1]/256.F:1e6F};
 }
+namespace {
+std::array<float,3> arwing_position(const std::array<float,3>& p) {
+    return {(p[0]-cockpit_arwing_eye_obj[0])*cockpit_arwing_scale,
+        (p[1]-cockpit_arwing_eye_obj[1])*cockpit_arwing_scale,
+        -(p[2]-cockpit_arwing_eye_obj[2])*cockpit_arwing_scale};
+}
+}
+DrawPacket cockpit_arwing_packet(bool srgb,unsigned brightness,std::optional<std::array<float,2>> keep_x) {
+    DrawPacket out;
+    for(const auto& triangle:cockpit_assets::arwing) {
+        std::vector<SceneVertex> polygon;
+        for(const auto& p:triangle.points)polygon.push_back(flat_vertex(arwing_position(p),triangle.rgb,srgb,brightness));
+        if(keep_x) {
+            polygon=clip_axis(polygon,0,(*keep_x)[0],true);
+            polygon=clip_axis(polygon,0,(*keep_x)[1],false);
+        }
+        if(!has_area(polygon))continue;
+        for(size_t i=1;i+1<polygon.size();++i)for(size_t k:{size_t{0},i,i+1})out.geometry.vertices.push_back(polygon[k]);
+    }
+    return out;
+}
+DrawPacket cockpit_arwing_repair_packet(const DrawPacket& source) {
+    DrawPacket out;out.preserve_native_colour=source.preserve_native_colour;out.shading=source.shading;
+    // The native FLASHPLAYER uses one flat wire colour. An empty native packet
+    // remains empty during its hidden phases. Copy the live material, not a new timer.
+    const auto lines=source.geometry.line_view();const auto triangles=source.geometry.vertex_view();
+    if(lines.empty() && triangles.empty())return out;
+    const auto ink=!lines.empty()?lines.front():triangles.front();
+    for(const auto& edge:cockpit_assets::arwing_edges)for(const auto& p:edge) {
+        auto v=ink;const auto position=arwing_position(p);
+        // A tiny pilot-directed bias makes edges visible on the depth-tested hull.
+        for(unsigned a=0;a<3;++a)v.position[a]=position[a]*.998F;
+        v.visibility_enabled=v.group_enabled=0;out.geometry.line_vertices.push_back(v);
+    }
+    return out;
+}
 std::vector<DrawPacket> CockpitGeometry::assemble(SourceModelPackets& world,const GameSceneSnapshot& scene,
     const PresentationPreferences& preferences,bool srgb) {
     if(!pilot_view_active(scene,preferences))return {};
     const unsigned key=std::min(unsigned(scene.display_brightness),15U)+(srgb?16:0);
-    if(!cabin_[key]) {
-        if(!front_)front_=decoder_.decode_by_name(symbols_,"COCKPIT");
-        cabin_[key]=std::array{cockpit_front_packet(*front_,srgb,scene.display_brightness),
-            cockpit_rear_packet(srgb,scene.display_brightness)};
-    }
-    std::vector<DrawPacket> out{(*cabin_[key])[0],(*cabin_[key])[1]};
+    if(!cabin_[key])cabin_[key]=cockpit_arwing_packet(srgb,scene.display_brightness);
+    std::vector<DrawPacket> out{*cabin_[key]};
     for(size_t i=0;i<world.handles.size();++i) {
         const bool player=world.handles[i]==scene.player;
         const auto object=std::find_if(scene.objects.begin(),scene.objects.end(),
@@ -234,8 +187,17 @@ std::vector<DrawPacket> CockpitGeometry::assemble(SourceModelPackets& world,cons
         if(std::any_of(world.compute_models.begin(),world.compute_models.end(),
             [&](const auto& model){return model.packet_index==i;}))
             throw std::runtime_error("Cockpit player rig requires source triangle geometry");
-        out.push_back(cockpit_ship_packet(world.packets[i],player && object!=scene.objects.end()
-            ?damaged_extent(object->object.shape):std::nullopt));
+        if(repair)out.push_back(cockpit_arwing_repair_packet(world.packets[i]));
+        if(player && object!=scene.objects.end() && intact_x_) {
+            if(auto extent=damaged_extent(object->object.shape)) {
+                // Preserve the native fraction of each wing that remains. The
+                // replacement's silhouette differs, so use its full source span.
+                constexpr float half_span=5.201948F*cockpit_arwing_scale;
+                (*extent)[0]*=256.F*half_span/std::abs((*intact_x_)[0]);
+                (*extent)[1]*=256.F*half_span/std::abs((*intact_x_)[1]);
+                out[0]=cockpit_arwing_packet(srgb,scene.display_brightness,extent);
+            }
+        }
         world.packets[i]=DrawPacket{};
     }
     return out;

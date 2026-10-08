@@ -1,5 +1,9 @@
 # Cockpit C presentation assets
 
+Historical editable assets, superseded in the runtime on October 8 by
+`assets/vr/arwing-snes`. The descriptions below record the previous rig; these
+assets are no longer compiled by `tools/generate_cockpit_assets.py`.
+
 These thirteen rear modules and flat materials are newly authored assets. Seven
 come from the user-approved C package. Wearer requests on October 3 added three
 `rear_bulkhead_*` boxes, closing the cabin behind the seat at shoulder height, and

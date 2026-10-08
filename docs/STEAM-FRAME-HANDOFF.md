@@ -1741,3 +1741,44 @@ That's about 18% less GPU time in the busy part of Corneria, up to 26% in one
 window. It's far more than the `sky` segment suggested, so the segment proportions
 understate the sky: they come from one tile. The `off` run matches the earlier
 Enhanced Sky A/B (16.4 ms), so the comparison holds.
+
+## Supplied SNES Arwing cockpit replacement (October 8)
+
+The active cockpit now uses the user-supplied custom SNES Arwing, replacing the
+previous source-decoded C shell, generated rear modules and clipped native hull.
+`assets/vr/arwing-snes/geometry.json` records source OBJ/palette hashes and the
+Blender tessellation. Four translucent pane faces are omitted; 21 zero-area or
+near-collinear source triangles are discarded at the OBJ's coordinate precision.
+The compiled mesh has 497 triangles and retains the source palette/proportions.
+The old editable `cockpit-c` assets are retained as historical material only.
+
+The uniform fit is 1.75 metres per OBJ unit with eye `(0, 1.05, 0.40)`. Existing
+pilot tracking, cockpit rotation/scale settings, menus, controls and simulation
+are unchanged. Native Layout A instrument geometry and pixels are mounted to
+the supplied sloped dashboard, centred near `(-0.015, -0.75, -1.047744)` metres.
+Dark backing bands follow connected live artwork rows with a 12 mm border,
+2 mm behind the artwork, for contrast against the cyan dash. Boss meters and
+portraits keep their source layout; the separated boss row gets its own backing
+so the empty space above the main instruments stays open.
+
+Native wing-loss shapes trim the corresponding fraction of the replacement
+wings. Native repair visibility, timing and colour drive an outline of the
+replacement mesh in cockpit view; chase/world art and native effect state stay
+unchanged. The source data remains in the user's runtime asset bundle.
+
+Host verification on the change based on `842f495`:
+
+- The supplied OBJ reimport is deterministic with Blender 5.1.1; geometry JSON
+  SHA-256 `7a3a0694ddc45db9bdc27a90798838144e719ebce96e8d08c10e3e1edc59b820`.
+- Asset freshness and six focused CTests pass (geometry, input, presentation,
+  eye camera, cockpit depth policy and generated assets).
+- The real Original and EX bundle fixtures pass source-state/other-object/HUD
+  artwork invariance, head clearance, central sightlines, dashboard occlusion,
+  native wing damage, backing bounds/depth, and the native repair cycle
+  (9 visible / 11 hidden phases in each fixture).
+- Matching before/after packet captures and host renders are in the October 8
+  task workspace's `comparison/` directory. These render exact production
+  geometry with the native HUD art; they are not headset or live GPU captures.
+
+The replacement is **headset-unverified**: no new device performance, controller,
+stereo, comfort or worn acceptance is claimed by these host checks.
