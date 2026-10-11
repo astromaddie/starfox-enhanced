@@ -24,17 +24,9 @@ Hold **Menu + View** for half a second to open the VR settings menu. Use the con
 
 The Frame preferences target **2160×2160 per eye** and a 90 Hz minimum. The VR menu offers 90 Hz, 120 Hz and SYSTEM, plus a render-resolution setting. SteamVR's per-app settings control the display rate.
 
-## Build the Frame package
+## Build and install the Frame package
 
-Build from a **Linux host** with Clang, LLD, CMake, Ninja, Python 3, curl, tar, sha256sum and readelf. `tools/build_steam_frame.sh` downloads and verifies the pinned Sniper ARM64 sysroot, builds the flat diagnostic and VR targets, and stages the package:
-
-```sh
-git clone --branch main https://github.com/astromaddie/starfox-enhanced.git
-cd starfox-enhanced
-tools/build_steam_frame.sh
-```
-
-The package is written to `build/steam-frame-cross/package/`. The script accepts a source root, build directory and package directory as optional positional arguments. Its build environment and package contents are described in `tools/package/STEAM-FRAME-DIAGNOSTICS.txt` and `docs/STEAM-FRAME-HANDOFF.md`.
+The [Steam Frame build and install guide](docs/STEAM-FRAME-BUILD-INSTALL.md) covers the native Linux cross-build from Linux or Windows through WSL2, host tools, package output, game-data preparation, first installation and Steam launch. It separates the standalone Linux ARM64 Frame target from the Windows and desktop VR builds. Build environment and package details are in [Frame diagnostics](tools/package/STEAM-FRAME-DIAGNOSTICS.txt) and the [Frame handoff](docs/STEAM-FRAME-HANDOFF.md).
 
 ## Game data
 
