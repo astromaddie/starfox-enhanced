@@ -27,10 +27,9 @@ if(STARFOX_EMBED_RUNTIME_ASSETS)
     set(vr_generated_assets "${vr_generated_dir}/vr_embedded_assets.cpp")
     set(vr_split_outputs)
     set(vr_embed_options)
-    if(ANDROID)
-        # Quest has the same limited CI/compiler memory as the Android build.
-        # A single translation unit containing all backdrop BMPs can exhaust
-        # the hosted runner before it can report a compiler error.
+    if(ANDROID OR STARFOX_SPLIT_EMBEDDED_ASSETS)
+        # Keep the VR resource build within the same compiler memory budget
+        # as the desktop resource build, including ARM64 Linux containers.
         list(APPEND vr_embed_options --chunk-bytes 8192 --split-dir
             "${vr_generated_dir}")
         foreach(identifier IN LISTS vr_resource_ids)
