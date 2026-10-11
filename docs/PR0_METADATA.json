@@ -4,7 +4,7 @@
   "status": "EXPERIMENTAL",
   "publication_status": "public repository; existing visibility retained; no new release",
   "audited_commit": "8c3c3ae587d9e2fc3ce346dc7193f9d7fe896c66",
-  "current_checkout_commit": "8c3c3ae587d9e2fc3ce346dc7193f9d7fe896c66",
+  "current_checkout_commit": "4f1d5cad23a454c0ca632644bb5f1362a86009b8",
   "branch": "main",
   "tested_commit": null,
   "supported_targets": [
@@ -12,14 +12,15 @@
   ],
   "validation": {
     "source_commit": null,
-    "result": "No new build or tests were run for this audit. Both branches were mirrored; 23 LFS pointers were inventoried, payload bytes not fetched."
+    "result": "No new application build or tests were run for this audit. Both branches were mirrored. All 23 inventoried Git LFS payloads were fetched anonymously and their sizes and SHA-256 hashes verified (928,120,303 bytes). Payload inspection found soundtrack content in the PAK and two historical executables."
   },
   "full_application_build": "not run for current audited source",
   "distribution_blockers": [
-    "tracked dist/StarFoxEnhanced contains compiled executables; Git LFS also tracks Starfox-MSU1.PAK and other distribution payloads. LFS bytes were unavailable for this audit, so contents and rights remain unverified. Do not make a new release until dist outputs and LFS contents/provenance are resolved. The repository is already public; this record makes no visibility change."
+    "Tracked dist outputs include compiled executables. Starfox-MSU1.PAK contains 52 FLAC tracks, and two historical Windows executables each embed 52 FLAC resources. The credited upstream music set has no standalone license file; soundtrack redistribution rights remain unresolved. Two PS5 splash images have unresolved asset provenance. The other 18 LFS executables were classified from headers only. Resolve these assets and reachable history before a new release. Existing public visibility is retained."
   ],
   "data_boundary": "Supported retail ROM is user supplied. The project guide describes supported revisions. No ROM or commercial asset redistribution right is implied.",
   "changelog": "CHANGELOG.md",
   "audit_date": "2026-10-11",
-  "audit_details": "docs/PR0_READINESS.md"
+  "audit_details": "docs/PR0_READINESS.md",
+  "lfs_audit_source_commit": "4f1d5cad23a454c0ca632644bb5f1362a86009b8"
 }

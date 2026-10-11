@@ -5,16 +5,18 @@
 | Record | Revision |
 | --- | --- |
 | Hygiene audit | `8c3c3ae587d9e2fc3ce346dc7193f9d7fe896c66` |
-| Checkout when this record was updated | `8c3c3ae587d9e2fc3ce346dc7193f9d7fe896c66` |
+| LFS payload audit source | `4f1d5cad23a454c0ca632644bb5f1362a86009b8` |
 | Build/test source | No fresh full-build SHA recorded in this audit. |
 
 Target: Linux ARM64 / Steam Frame / OpenXR / Vulkan.
 
-No new build or tests were run for this audit. Both branches were mirrored; 23 LFS pointers were inventoried, payload bytes not fetched. No new full application build is claimed for this audit.
+Both branches were mirrored. All 23 inventoried LFS payloads were downloaded through anonymous GitHub access and matched their recorded sizes and SHA-256 hashes: 928,120,303 bytes in total. No new application build is claimed for this audit.
 
 The publication blockers are:
 
-- tracked dist/StarFoxEnhanced contains compiled executables; Git LFS also tracks Starfox-MSU1.PAK and other distribution payloads. LFS bytes were unavailable for this audit, so contents and rights remain unverified. Do not make a new release until dist outputs and LFS contents/provenance are resolved. The repository is already public; this record makes no visibility change.
+- `Starfox-MSU1.PAK` contains 52 FLAC tracks. Two historical Windows executables each embed 52 FLAC tracks. The music set is credited in the upstream notices, but its separate redistribution terms are unresolved.
+- Two PS5 splash images have unresolved asset provenance. The other 18 LFS executables were checked by their file headers; their resources were not exhaustively unpacked.
+- Generated `dist/StarFoxEnhanced` outputs and their reachable history need cleanup before a new source-only release. The repository was already public, and its visibility is unchanged.
 
 Supported retail ROM is user supplied. The project guide describes supported revisions. No ROM or commercial asset redistribution right is implied. Keep the original upstream and component notices; they do not grant rights to the commercial game.
 
