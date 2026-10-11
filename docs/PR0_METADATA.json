@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "milestone": "PR0",
+  "status": "EXPERIMENTAL",
+  "publication_status": "public repository; existing visibility retained; no new release",
+  "audited_commit": "8c3c3ae587d9e2fc3ce346dc7193f9d7fe896c66",
+  "current_checkout_commit": "8c3c3ae587d9e2fc3ce346dc7193f9d7fe896c66",
+  "branch": "main",
+  "tested_commit": null,
+  "supported_targets": [
+    "Linux ARM64 / Steam Frame / OpenXR / Vulkan"
+  ],
+  "validation": {
+    "source_commit": null,
+    "result": "No new build or tests were run for this audit. Both branches were mirrored; 23 LFS pointers were inventoried, payload bytes not fetched."
+  },
+  "full_application_build": "not run for current audited source",
+  "distribution_blockers": [
+    "tracked dist/StarFoxEnhanced contains compiled executables; Git LFS also tracks Starfox-MSU1.PAK and other distribution payloads. LFS bytes were unavailable for this audit, so contents and rights remain unverified. Do not make a new release until dist outputs and LFS contents/provenance are resolved. The repository is already public; this record makes no visibility change."
+  ],
+  "data_boundary": "Supported retail ROM is user supplied. The project guide describes supported revisions. No ROM or commercial asset redistribution right is implied.",
+  "changelog": "CHANGELOG.md",
+  "audit_date": "2026-10-11",
+  "audit_details": "docs/PR0_READINESS.md"
+}
