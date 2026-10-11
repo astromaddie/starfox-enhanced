@@ -4,6 +4,8 @@ This is the native Steam Frame VR port of [Star Fox Enhanced](https://github.com
 
 **EXPERIMENTAL.** I made this Frame fork for personal use, and it's still a work in progress. Bring your own supported Star Fox ROM.
 
+**Want to play on Steam Frame?** Download the prebuilt standalone package from the [v0.1.0 prerelease](https://github.com/astromaddie/starfox-enhanced/releases/tag/v0.1.0); no compiler is needed. Bring your own supported Star Fox game ROM.
+
 The port keeps the game's two experiences and adds tracked stereo views, Frame controller input, a runtime VR menu, and cockpit and chase camera options. The cockpit uses a hybrid Arwing interior, combining the SNES Arwing shape with a cabin interior. The headset view includes the game's HUD and supports optional OpenXR hidden-area masks when the runtime provides them.
 
 ## What the Frame fork adds
