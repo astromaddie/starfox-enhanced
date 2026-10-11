@@ -78,6 +78,7 @@ common_cmake_args=(
     -DSTARFOX_BUILD_TESTS=OFF
     -DSTARFOX_BUILD_TOOLS=OFF
     -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
+    -DSTARFOX_SPLIT_EMBEDDED_ASSETS=ON
 )
 cmake_debug_args=()
 if [[ "${STARFOX_CMAKE_DEBUG_TRY_COMPILE:-}" == "1" ]]; then

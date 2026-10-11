@@ -918,12 +918,14 @@ if(STARFOX_BUILD_RUNTIME)
             "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_assets.cpp")
         set(STARFOX_EMBED_CHUNK_ARGS)
         set(STARFOX_EMBED_SPLIT_OUTPUTS)
-        if(ANDROID OR WINDOWS_STORE)
+        option(STARFOX_SPLIT_EMBEDDED_ASSETS
+            "Compile embedded resources in bounded translation units" ${ANDROID})
+        if(ANDROID OR WINDOWS_STORE OR STARFOX_SPLIT_EMBEDDED_ASSETS)
             # MSVC's compiler heap cannot concatenate a multi-megabyte BMP
             # literal; mobile compilers also need bounded literal sizes.
             list(APPEND STARFOX_EMBED_CHUNK_ARGS --chunk-bytes 8192)
         endif()
-        if(ANDROID)
+        if(STARFOX_SPLIT_EMBEDDED_ASSETS)
             # A single source file containing every backdrop exhausts mobile
             # runner RAM. Compile each resource in a bounded translation unit.
             list(APPEND STARFOX_EMBED_CHUNK_ARGS --split-dir
